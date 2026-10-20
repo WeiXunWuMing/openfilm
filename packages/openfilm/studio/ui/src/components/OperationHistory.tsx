@@ -12,7 +12,8 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { User } from 'lucide-react';
 import { useT } from '@/i18n';
-import { shortcutHint } from '@/lib/shortcut-hint';
+import { hintOf } from '@/lib/keymap';
+import { currentKeymap, MAC } from '@/lib/keymap-store';
 
 /** One step of the session. */
 export interface SessionOp {
@@ -174,7 +175,7 @@ function OpRow({
         </span>
         {next ? (
           <span className="shrink-0 rounded-full bg-[var(--accent)]/15 px-1.5 py-px text-[10px] font-medium text-[var(--accent)]">
-            {shortcutHint('Z', { mod: true })}
+            {hintOf(currentKeymap(), 'undo', MAC)}
           </span>
         ) : null}
       </button>

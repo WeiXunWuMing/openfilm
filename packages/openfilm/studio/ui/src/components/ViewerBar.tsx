@@ -9,6 +9,7 @@ import { formatTimecode, useTimecodeFps } from '@/lib/timecode';
 import { PANE_BTN, PANE_ICON } from './dock-pane-bar';
 import { LiveText, type PlaybackClock } from './LiveTime';
 import { Tooltip } from './Tooltip';
+import { useKeyHint } from '@/lib/keymap-store';
 
 /** The bar's buttons: the pane-bar size (22×22, icon 14) plus a keyboard focus ring (Tab must show where it is). */
 const VIEW_BTN = `${PANE_BTN} outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]`;
@@ -37,6 +38,7 @@ export function ViewerBar({
   loop?: { on: boolean; ranged: boolean; onToggle: () => void } | null;
 }) {
   const t = useT();
+  const keyHint = useKeyHint();
   /* frames are counted at the project's rate: shown anew when it changes */
   useTimecodeFps();
   const playable = totalMs > 0;
@@ -54,7 +56,7 @@ export function ViewerBar({
           {' / '}{formatTimecode(totalMs, { hours })}
         </span>
       </span>
-      <Tooltip label={playing ? t('viewer.pause') : t('viewer.play')} shortcut="Space">
+      <Tooltip label={playing ? t('viewer.pause') : t('viewer.play')} shortcut={keyHint('play-pause')}>
         <button
           type="button"
           onClick={onPlayPause}
@@ -69,7 +71,7 @@ export function ViewerBar({
       </Tooltip>
       <span className="flex items-center justify-end gap-1">
         {loop ? (
-          <Tooltip label={t(loop.ranged ? 'viewer.loopRange' : 'viewer.loopFilm')} shortcut="⇧L">
+          <Tooltip label={t(loop.ranged ? 'viewer.loopRange' : 'viewer.loopFilm')} shortcut={keyHint('loop')}>
             <button
               type="button"
               onClick={loop.onToggle}

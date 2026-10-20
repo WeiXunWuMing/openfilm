@@ -21,7 +21,9 @@ import type { ReplaceFamily } from '@/lib/clip-replace';
 import { layoutTracks, type TimelineBlock, type TimelineTrack } from '@/lib/timeline-layout';
 import { filmClipKind, filmSrcIsPage, filmSrcKind, filmTrackBadges, parseFilmDocLoc, type FilmBox, type FilmDoc, type FilmOverride } from '@/lib/film';
 import { exactRate, footageFps, setTimecodeFps, snapToFrame, stepFrames } from '@/lib/timecode';
-import { JUMP_FRAMES, keyCommandOf, loopBack, playStart, shuttleRate } from '@/lib/timeline-keys';
+import { JUMP_FRAMES, loopBack, playStart, shuttleRate } from '@/lib/timeline-keys';
+import { comboOf, parseCombo } from '@/lib/keymap';
+import { currentKeymap, keyAction, useKeyHint } from '@/lib/keymap-store';
 import { attrsOf, pasteAttrs, type AttrGroup, type CopiedAttrs } from '@/lib/clip-attrs';
 import { cutPoints, namedTrack, nextCut, trackNamesOf } from '@/lib/timeline-nav';
 import { anyLocked, lockedEdits } from '@/lib/track-lock';
@@ -56,7 +58,6 @@ import type { ContextMenuEntry } from './ContextMenu';
 import { studioHost, useHostPanel, type CommunityItem, type HostPanel, type StageBox, type StudioCommand, type StudioRef } from '../lib/host';
 import { clipRef, fileRef, layerRef, markRange, momentRef, rangeRef, regionRef, stillUrl, subtitleRef, trackRef, type ClipFrameSource, type FilmRange } from '@/lib/studio-refs';
 import { boxNow, chatPointOf, draftBoxesAt, draftMarksOf, sameClip, NO_DRAFT, type DraftMarks, type PictureMarks } from '@/lib/chat-marks';
-import { shortcutHint } from '@/lib/shortcut-hint';
 import { usePageChanges } from './use-page-changes';
 import { SubtitleOverlay } from './SubtitleOverlay';
 import { SubtitleInspector, subtitleLineKey, type SubtitleLineAt, type SubtitleLineRefer } from './SubtitleInspector';
@@ -198,6 +199,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
 }) {
   const t = useT();
   const toast = useToast();
+  const keyHint = useKeyHint();
   /* how many times the project's files changed since it opened (see the folder events below) */
   const [filesTick, setFilesTick] = React.useState(0);
   const [loaded, setLoaded] = React.useState<ProjectFilm | null>(null);
@@ -1348,9 +1350,9 @@ export function ProjectView({ projectId, onProject, onLeave }: {
       of: refOfSubtitle,
       send: refer,
       pick: (line) => setSubtitlePick((cur) => (same(cur, line) ? cur : line)),
-      shortcut: shortcutHint('L', { mod: true }),
+      shortcut: keyHint('refer') ?? '',
     };
-  }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [projectId, keyHint]); // eslint-disable-line react-hooks/exhaustive-deps
   /** A thing in hand on the picture as a reference: a whole clip as its block is, a layer where it is drawn. */
   const refOfStagePick = (pick: StagePick): StudioRef | null => {
     const el = pick.element;
@@ -1734,7 +1736,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     if (!refer) return [];
     return [{
       id: 'refer', label: t('host.refer'), icon: <MessageSquarePlus size={14} />,
-      ...(withKey ? { shortcut: shortcutHint('L', { mod: true }) } : {}),
+      ...(withKey ? { shortcut: keyHint('refer') } : {}),
       onSelect: () => { for (const ref of refs()) refer(ref); },
     }];
   };
@@ -1745,15 +1747,15 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     const extra = whole && !block ? [] : [...referEntry(() => [whole ? refOfBlock(block!) : refOfLayer(el)]), ...(whole && block ? saveEntry([block]) : [])];
     return extra.length ? [...extra, ...(entries.length ? [{ id: 'refer-sep', separator: true } as const] : []), ...entries] : entries;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stageMenuFor, t, saveBlocks]);
+  }, [stageMenuFor, t, keyHint, saveBlocks]);
   /** Two groups of menu entries, a line between them when both have some. */
   const menuGroups = (a: ContextMenuEntry[], b: ContextMenuEntry[]): ContextMenuEntry[] => (a.length && b.length ? [...a, { id: 'tools-sep', separator: true }, ...b] : [...a, ...b]);
   /* copy and paste attributes, in the clip menu */
   const attrsEntries = (blocks: readonly TimelineBlock[]): ContextMenuEntry[] => [
-    { id: 'copy-attrs', label: t('clipAttrs.copy'), icon: <ClipboardCopy size={14} />, shortcut: shortcutHint('C', { mod: true, shift: true }), disabled: blocks.length !== 1, onSelect: () => copyAttrs(blocks) },
-    { id: 'paste-attrs', label: t('clipAttrs.pasteMenu'), icon: <ClipboardPaste size={14} />, shortcut: shortcutHint('V', { mod: true, shift: true }), disabled: !copiedAttrs, hint: t('clipAttrs.nothing'), onSelect: () => askPasteAttrs(blocks) },
+    { id: 'copy-attrs', label: t('clipAttrs.copy'), icon: <ClipboardCopy size={14} />, shortcut: keyHint('copy-attrs'), disabled: blocks.length !== 1, onSelect: () => copyAttrs(blocks) },
+    { id: 'paste-attrs', label: t('clipAttrs.pasteMenu'), icon: <ClipboardPaste size={14} />, shortcut: keyHint('paste-attrs'), disabled: !copiedAttrs, hint: t('clipAttrs.nothing'), onSelect: () => askPasteAttrs(blocks) },
   ];
-  const timelineMenuExtra = React.useCallback((blocks: readonly TimelineBlock[]) => (blocks.length ? menuGroups(menuGroups([...referEntry(() => blocks.map(refOfBlock)), ...saveEntry(blocks)], tools.menuExtra(blocks)), attrsEntries(blocks)) : []), [t, tools.menuExtra, copiedAttrs, copyAttrs, askPasteAttrs, saveBlocks]); // eslint-disable-line react-hooks/exhaustive-deps
+  const timelineMenuExtra = React.useCallback((blocks: readonly TimelineBlock[]) => (blocks.length ? menuGroups(menuGroups([...referEntry(() => blocks.map(refOfBlock)), ...saveEntry(blocks)], tools.menuExtra(blocks)), attrsEntries(blocks)) : []), [t, keyHint, tools.menuExtra, copiedAttrs, copyAttrs, askPasteAttrs, saveBlocks]); // eslint-disable-line react-hooks/exhaustive-deps
   const trackMenuExtra = React.useCallback((track: TimelineTrack) => {
     const docIndex = track.docIndex;
     const refer = docIndex == null || !studioHost?.refer ? [] : referEntry(() => { const ref = trackRef(tracksRef.current, docIndex); return ref ? [ref] : []; }, false);
@@ -2257,9 +2259,9 @@ export function ProjectView({ projectId, onProject, onLeave }: {
   });
 
   /*
-   * ── keys (lib/timeline-keys, listed in Settings): Space plays, J / K / L shuttle, I / O mark a range, ← / → step a
-   * frame (⇧ a second), ↑ / ↓ go from cut to cut, ⌘Z / ⇧⌘Z undo; the timeline's own (⌘B, Q / W, ⌥← / →, N…) through
-   * its commands. Not while typing, nor in a dialog. ──
+   * ── keys (lib/keymap, the scheme chosen in Settings; by default): Space plays, J / K / L shuttle, I / O mark a range,
+   * ← / → step a frame (⇧ ten), ↑ / ↓ go from cut to cut, ⌘Z / ⇧⌘Z undo; the timeline's own (⌘B, Q / W, ⌥← / →, N…)
+   * through its commands. Not while typing, nor in a dialog. ──
    */
   const tabbed = React.useRef(false);
   React.useEffect(() => {
@@ -2269,10 +2271,13 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     window.addEventListener('pointerdown', byPointer, true);
     return () => { window.removeEventListener('keydown', byKey, true); window.removeEventListener('pointerdown', byPointer, true); };
   }, []);
-  /* K held down: J and L step a frame (K+J, K+L) */
+  /* K (stop) held down: J and L (back, forward) step a frame (K+J, K+L) */
   const kHeld = React.useRef(false);
   React.useEffect(() => {
-    const up = (e: KeyboardEvent) => { if (e.key.toLowerCase() === 'k' || e.code === 'KeyK') kHeld.current = false; };
+    const up = (e: KeyboardEvent) => {
+      const key = parseCombo(comboOf({ key: e.key, code: e.code, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false }, MAC) ?? '')?.key;
+      if (key && currentKeymap()['shuttle-stop'].some((combo) => parseCombo(combo)?.key === key)) kHeld.current = false;
+    };
     const lost = () => { kHeld.current = false; };
     window.addEventListener('keyup', up, true);
     window.addEventListener('blur', lost);
@@ -2287,8 +2292,7 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     const refer = studioHost?.refer;
     const el = event.target as HTMLElement | null;
     if (!refer || event.defaultPrevented || isTypingTarget(el) || el?.closest?.('[role="dialog"]')) return false;
-    const mod = event.metaKey || event.ctrlKey;
-    if (mod && event.key.toLowerCase() === 'l' && !event.shiftKey && !event.altKey) {
+    if (keyAction(event) === 'refer') {
       event.preventDefault();
       for (const ref of selectedRefs()) refer(ref);
       return true;
@@ -2300,15 +2304,15 @@ export function ProjectView({ projectId, onProject, onLeave }: {
   keyNowRef.current = (event) => {
     if (referKeysRef.current(event)) return;
     const el = event.target as HTMLElement | null;
-    const mod = MAC ? event.metaKey : event.ctrlKey;
-    if (event.key.toLowerCase() === 'z' && mod && !event.altKey) {
+    const cmd = keyAction(event);
+    if (cmd === 'undo' || cmd === 'redo') {
       if (isTypingTarget(el) || el?.closest('[role="dialog"]')) return;
       /* not checked against canUndo: a nudge on the picture not written yet is written first, and is the step undone */
       event.preventDefault();
-      stepHistory(event.shiftKey ? 'redo' : 'undo');
+      stepHistory(cmd);
       return;
     }
-    if (event.code === 'Space' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
+    if (cmd === 'play-pause') {
       if (isTypingTarget(el)) return;
       if (event.repeat) { event.preventDefault(); return; }
       if (el?.closest('[role="dialog"]')) return;
@@ -2322,7 +2326,6 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     if (event.defaultPrevented || isTypingTarget(el) || el?.closest?.('[role="dialog"]')) return;
     /* Esc lets the range go as it lets the selection go (those listen on their own); a menu or a panel open takes it */
     if (event.key === 'Escape' && markedRange && !document.querySelector('[role="menu"], [role="listbox"], [data-popover-panel]')) setMarkedRange(null);
-    const cmd = keyCommandOf(event, MAC);
     if (!cmd) return;
     /* a menu or a list open has the arrows; a slider (the ruler, a volume) steps itself with ← / → */
     if (el?.closest?.('[role="menu"], [role="listbox"]') && /^(frame|second|prev|next|start|end|nudge)/.test(cmd)) return;

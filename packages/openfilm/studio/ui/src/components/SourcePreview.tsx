@@ -14,6 +14,7 @@ import { STILL_DROP_MS } from '@/lib/asset-timeline';
 import type { SourceRange } from '@/lib/media-place';
 import { exactRate, formatTimecode, snapToFrame, useTimecodeFps } from '@/lib/timecode';
 import { type MediaSources, type WorkspaceResource } from '@/lib/workspace-resources';
+import { keyAction } from '@/lib/keymap-store';
 import { isTypingTarget } from './typing-target';
 import { KIND_ICON, MediaPreview } from './MediaPreview';
 import { PANE_BTN, PANE_ICON } from './dock-pane-bar';
@@ -34,7 +35,7 @@ function rangeOf(marks: Marks, duration: number): SourceRange | null {
 
 /**
  * The source's keys while it is up (before the editor's own: these are the source monitor's): I / O mark, X lets the
- * marks go, `,` / `.` put the part marked on the film. Not while typing.
+ * marks go, `,` / `.` put the part marked on the film (by default; lib/keymap). Not while typing.
  */
 function useSourceKeys(path: string, time: number, duration: number, onPlace: SourcePreviewProps['onPlace']) {
   const [marks, setMarksState] = React.useState<Marks>(() => marksByPath.get(path) ?? { in: null, out: null });
@@ -44,20 +45,20 @@ function useSourceKeys(path: string, time: number, duration: number, onPlace: So
   now.current = { time, duration, marks };
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (isTypingTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
+      if (isTypingTarget(e.target) || e.defaultPrevented) return;
       if ((e.target as Element | null)?.closest?.('[role="dialog"]')) return;
       const { time: at, duration: dur, marks: m } = now.current;
-      const key = e.key.toLowerCase();
+      const action = keyAction(e);
       /* on the file's own frame grid, as the film's marks are on the film's */
       const sec = Math.min(dur, snapToFrame(at * 1000) / 1000);
       let next: Marks | null = null;
-      if (key === 'i' && !e.shiftKey) next = { in: sec, out: m.out != null && m.out > sec ? m.out : null };
-      else if (key === 'o' && !e.shiftKey) next = { in: m.in != null && m.in < sec ? m.in : null, out: sec };
-      else if (key === 'x' && !e.shiftKey) next = { in: null, out: null };
-      else if ((e.key === ',' || e.key === '.') && onPlace && !e.shiftKey) {
+      if (action === 'mark-in') next = { in: sec, out: m.out != null && m.out > sec ? m.out : null };
+      else if (action === 'mark-out') next = { in: m.in != null && m.in < sec ? m.in : null, out: sec };
+      else if (action === 'clear-range') next = { in: null, out: null };
+      else if ((action === 'insert-source' || action === 'overwrite-source') && onPlace) {
         e.preventDefault();
         e.stopPropagation();
-        onPlace(e.key === ',' ? 'insert' : 'overwrite', rangeOf(m, dur));
+        onPlace(action === 'insert-source' ? 'insert' : 'overwrite', rangeOf(m, dur));
         return;
       } else return;
       e.preventDefault();

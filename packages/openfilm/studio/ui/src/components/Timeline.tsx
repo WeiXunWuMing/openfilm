@@ -58,7 +58,7 @@ import {
   Blend,
 } from 'lucide-react';
 import { useT } from '@/i18n';
-import { shortcutHint } from '@/lib/shortcut-hint';
+import { keyAction, useKeyHint } from '@/lib/keymap-store';
 import { ownTrackHeight } from '@/lib/track-heights';
 import type { Op } from '@/api';
 import type { ClipEdit } from '@/lib/film-clip-edits';
@@ -1010,6 +1010,7 @@ export const Timeline = React.memo(function Timeline({
     return clock.subscribe(sync);
   }, [clock]);
   const t = useT();
+  const keyHint = useKeyHint();
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const rootRef = React.useRef<HTMLDivElement | null>(null);
   const toolbarRef = React.useRef<HTMLDivElement | null>(null);
@@ -2114,7 +2115,7 @@ export const Timeline = React.memo(function Timeline({
     [rippleRemove, removeMany],
   );
 
-  /* selected clips: Delete / Backspace deletes, ⌘C copies, ⌘V pastes at the playhead; not while typing */
+  /* selected clips: Delete / Backspace deletes, ⌘C copies, ⌘V pastes at the playhead (lib/keymap); not while typing */
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (isTypingTarget(e.target)) return;
@@ -2127,14 +2128,15 @@ export const Timeline = React.memo(function Timeline({
         onPickTransition?.(null);
         return;
       }
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'a' && activeRef.current) {
+      const action = keyAction(e);
+      if (action === 'select-all' && activeRef.current) {
         const all = tracks.filter((tr) => !tr.locked).flatMap((tr) => tr.blocks).filter((b) => b.loc).map((b) => b.id);
         if (!all.length) return;
         e.preventDefault();
         setSelected(all);
         return;
       }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (action === 'remove' || action === 'ripple-delete') {
         /* a transition picked: taken away (its fades, and the overlap it made) */
         if (pickedTransition && !picked.length && onTransition) {
           e.preventDefault();
@@ -2151,27 +2153,24 @@ export const Timeline = React.memo(function Timeline({
         if ((!onRemove && !onRemoveMany && !onEditOps) || !picked.length) return;
         e.preventDefault();
         /* ⌫ leaves a gap (with the magnet the main track closes up); ⇧⌫ closes it (a ripple delete) */
-        void (e.shiftKey ? rippleRemove(picked) : magnetRemove(picked));
+        void (action === 'ripple-delete' ? rippleRemove(picked) : magnetRemove(picked));
         return;
       }
-      const mod = e.metaKey || e.ctrlKey;
-      /* ⌘= / ⌘- / ⌘0 zoom the timeline (only when it is visible). ⌘+ is ⇧= on most keyboards, so before the ⇧ check. */
-      if (mod && !e.altKey && (e.key === '=' || e.key === '+' || e.key === '-' || e.key === '0')) {
+      /* ⌘= / ⌘- / ⌘0 zoom the timeline (only when it is visible) */
+      if (action === 'zoom-in' || action === 'zoom-out' || action === 'zoom-reset') {
         if (!playable || !scrollRef.current?.checkVisibility?.({ visibilityProperty: true })) return;
         e.preventDefault();
-        if (e.key === '0') zoomToStable(ZOOM_DEFAULT);
-        else zoomByStable(e.key === '-' ? 1 / ZOOM_STEP : ZOOM_STEP);
+        if (action === 'zoom-reset') zoomToStable(ZOOM_DEFAULT);
+        else zoomByStable(action === 'zoom-out' ? 1 / ZOOM_STEP : ZOOM_STEP);
         return;
       }
-      if (!mod || e.altKey || e.shiftKey) return;
-      const key = e.key.toLowerCase();
-      if (key === 'c') {
+      if (action === 'copy') {
         if (!onCopy || !picked.length) return;
         e.preventDefault();
         onCopy(picked);
         return;
       }
-      if (key === 'v') {
+      if (action === 'paste') {
         if (!onPaste || !hasClipboard) return;
         const lane = picked[0] ? laneOfBlock(tracks, picked[0].id) : null;
         if (lane && tracks.find((tr) => tr.lane === lane)?.locked) return;
@@ -2357,20 +2356,18 @@ export const Timeline = React.memo(function Timeline({
   }, [onSplit, splitting, tracks]);
 
   /**
-   * The tool keys: plain A / V / B switch the tool (the letters printed in the mode picker): B = "the pointer becomes a
-   * blade". ⌘B, "cut here", is the editor's (see TimelineCommands.split).
+   * The tool keys: A / V select, B splits (by default; lib/keymap): B = "the pointer becomes a blade". ⌘B, "cut here",
+   * is the editor's (see TimelineCommands.split).
    */
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (isTypingTarget(e.target)) return;
       if ((e.target as Element | null)?.closest?.('[role="dialog"]')) return;
-      if (!onSplit) return;
-      if (e.altKey || e.shiftKey || e.metaKey || e.ctrlKey || e.defaultPrevented) return;
-      const key = e.key.toLowerCase();
-      /* A or V selects, B splits */
-      if (key !== 'a' && key !== 'b' && key !== 'v') return;
+      if (!onSplit || e.defaultPrevented) return;
+      const action = keyAction(e);
+      if (action !== 'select-mode' && action !== 'split-mode') return;
       e.preventDefault();
-      setMode(key === 'b' ? 'split' : 'select');
+      setMode(action === 'split-mode' ? 'split' : 'select');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -3480,7 +3477,7 @@ export const Timeline = React.memo(function Timeline({
     if (menu.transition) {
       const there = menu.transition;
       return [{
-        id: 'tr-remove', label: t('transitions.remove'), icon: <Trash2 size={14} />, danger: true, shortcut: '⌫',
+        id: 'tr-remove', label: t('transitions.remove'), icon: <Trash2 size={14} />, danger: true, shortcut: keyHint('remove'),
         onSelect: () => { void onTransition?.({ kind: 'remove', key: there.key }).then((err) => { if (err) setDropError(err); }); onPickTransition?.(null); },
       }];
     }
@@ -3498,7 +3495,7 @@ export const Timeline = React.memo(function Timeline({
           id: 'paste',
           label: t('timeline.menuPaste'),
           icon: <ClipboardPaste size={14} />,
-          shortcut: shortcutHint('V', { mod: true }),
+          shortcut: keyHint('paste'),
           disabled: !onPaste || !hasClipboard || !menu.lane || laneLocked,
           hint: laneLocked ? t('timeline.trackLocked') : t('timeline.menuPasteEmpty'),
           onSelect: () => { if (menu.lane) void onPaste?.(menu.lane, menu.atMs); },
@@ -3510,7 +3507,7 @@ export const Timeline = React.memo(function Timeline({
           id: 'close-gap',
           label: t('timeline.menuCloseGap'),
           icon: <BetweenHorizontalStart size={14} />,
-          shortcut: '⌫',
+          shortcut: keyHint('remove'),
           onSelect: () => closeGapOn(found),
         });
       }
@@ -3543,7 +3540,7 @@ export const Timeline = React.memo(function Timeline({
         id: 'split',
         label: t('timeline.menuSplitHere'),
         icon: <Scissors size={14} />,
-        shortcut: shortcutHint('B', { mod: true }),
+        shortcut: keyHint('split'),
         disabled: !canSplit,
         /* disabled for one reason only: the playhead is not over this clip */
         hint: t('timeline.menuSplitOutside'),
@@ -3557,7 +3554,7 @@ export const Timeline = React.memo(function Timeline({
         id: 'ripple-start',
         label: t('timeline.menuRippleStart'),
         icon: <ArrowLeftToLine size={14} />,
-        shortcut: 'Q',
+        shortcut: keyHint('ripple-start'),
         disabled: !under,
         hint: pickedLocked ? t('timeline.trackLocked') : t('timeline.menuSplitOutside'),
         onSelect: () => { rippleTrimToPlayhead('start', [one]); },
@@ -3565,7 +3562,7 @@ export const Timeline = React.memo(function Timeline({
         id: 'ripple-end',
         label: t('timeline.menuRippleEnd'),
         icon: <ArrowRightToLine size={14} />,
-        shortcut: 'W',
+        shortcut: keyHint('ripple-end'),
         disabled: !under,
         hint: pickedLocked ? t('timeline.trackLocked') : t('timeline.menuSplitOutside'),
         onSelect: () => { rippleTrimToPlayhead('end', [one]); },
@@ -3634,7 +3631,7 @@ export const Timeline = React.memo(function Timeline({
         id: 'copy',
         label: t('timeline.menuCopy'),
         icon: <Copy size={14} />,
-        shortcut: shortcutHint('C', { mod: true }),
+        shortcut: keyHint('copy'),
         disabled: !picked.some((b) => b.loc),
         hint: t('timeline.menuCopyNone'),
         onSelect: () => onCopy(picked.filter((b) => b.loc)),
@@ -3646,7 +3643,7 @@ export const Timeline = React.memo(function Timeline({
         id: 'paste',
         label: t('timeline.menuPaste'),
         icon: <ClipboardPaste size={14} />,
-        shortcut: shortcutHint('V', { mod: true }),
+        shortcut: keyHint('paste'),
         disabled: !hasClipboard || !pasteLane || pickedLocked,
         hint: pickedLocked ? t('timeline.trackLocked') : t('timeline.menuPasteEmpty'),
         onSelect: () => { if (pasteLane) void onPaste(pasteLane, menu.atMs); },
@@ -3673,7 +3670,7 @@ export const Timeline = React.memo(function Timeline({
         danger: true,
         disabled: pickedLocked || !picked.some((b) => b.loc),
         hint: pickedLocked ? t('timeline.trackLocked') : t('timeline.menuCopyNone'),
-        shortcut: '⌫',
+        shortcut: keyHint('remove'),
         /* as ⌫: a gap is left */
         onSelect: () => { void magnetRemove(picked); },
       });
@@ -3685,14 +3682,14 @@ export const Timeline = React.memo(function Timeline({
           danger: true,
           disabled: pickedLocked || !picked.some((b) => b.loc),
           hint: pickedLocked ? t('timeline.trackLocked') : t('timeline.menuCopyNone'),
-          shortcut: '⇧⌫',
+          shortcut: keyHint('ripple-delete'),
           onSelect: () => { void rippleRemove(picked); },
         });
       }
     }
     return out;
   }, [
-    menu, t, onSplit, onDetachAudio, onRemove, onRemoveMany, onCopy, onPaste, onExportBlock, mediaTrouble, relinkCandidates,
+    menu, t, keyHint, onSplit, onDetachAudio, onRemove, onRemoveMany, onCopy, onPaste, onExportBlock, mediaTrouble, relinkCandidates,
     onRelink, hasClipboard, runSplit, removeMany, rippleRemove, magnetRemove, onEditOps, tracks, blockMenuExtra, headEntries, withLinked,
     runPlan, closeGapOn, rippleTrimToPlayhead, linkBlocks, unlinkBlocks, transitions, onTransition, onPickTransition, transitionEntries,
   ]);
@@ -3719,7 +3716,7 @@ export const Timeline = React.memo(function Timeline({
     if (barKind === 'point') {
       if (onSplit && selectedBlocks.length) {
         out.push({
-          id: 'split', label: t('selectionBar.splitSelected'), icon: <Scissors size={14} />, shortcut: shortcutHint('B', { mod: true }),
+          id: 'split', label: t('selectionBar.splitSelected'), icon: <Scissors size={14} />, shortcut: keyHint('split'),
           disabled: !underPlayhead.length || splitting, hint: t('selectionBar.splitNone'), onSelect: () => { void splitAll(); },
         });
       }
@@ -3727,7 +3724,7 @@ export const Timeline = React.memo(function Timeline({
     }
     if (barKind === 'range' && range) {
       if (onPlayRange) out.push({ id: 'play-range', label: t('selectionBar.playRange'), icon: <Play size={14} />, onSelect: () => onPlayRange(range) });
-      if (onRangeChange) out.push({ id: 'clear-range', label: t('selectionBar.clearRange'), icon: <X size={14} />, shortcut: 'X', onSelect: () => onRangeChange(null) });
+      if (onRangeChange) out.push({ id: 'clear-range', label: t('selectionBar.clearRange'), icon: <X size={14} />, shortcut: keyHint('clear-range'), onSelect: () => onRangeChange(null) });
       return out;
     }
     const picked = selectedBlocks;
@@ -3735,7 +3732,7 @@ export const Timeline = React.memo(function Timeline({
     const lockedHint = t('timeline.trackLocked');
     if (onSplit) {
       out.push({
-        id: 'split', label: t('timeline.menuSplitHere'), icon: <Scissors size={14} />, shortcut: shortcutHint('B', { mod: true }),
+        id: 'split', label: t('timeline.menuSplitHere'), icon: <Scissors size={14} />, shortcut: keyHint('split'),
         disabled: !underPlayhead.length || splitting, hint: pickedLocked ? lockedHint : t('timeline.menuSplitOutside'), onSelect: () => { void splitAll(); },
       });
     }
@@ -3767,7 +3764,7 @@ export const Timeline = React.memo(function Timeline({
     }
     if (onRemove || onRemoveMany || onEditOps) {
       out.push({
-        id: 'delete', label: t('timeline.removeBlock'), icon: <Trash2 size={14} />, shortcut: '⌫', danger: true,
+        id: 'delete', label: t('timeline.removeBlock'), icon: <Trash2 size={14} />, shortcut: keyHint('remove'), danger: true,
         disabled: pickedLocked || !picked.some((b) => b.loc), hint: lockedHint,
         onSelect: () => { void magnetRemove(picked); },
       });
@@ -3783,7 +3780,7 @@ export const Timeline = React.memo(function Timeline({
   })();
   /* first, always: the clips and the range, or the moment of the point */
   const barLead = barKind && onReferSelection ? {
-    id: 'refer', label: t('selectionBar.addToChat'), icon: <MessageSquarePlus size={14} />, shortcut: shortcutHint('L', { mod: true }),
+    id: 'refer', label: t('selectionBar.addToChat'), icon: <MessageSquarePlus size={14} />, shortcut: keyHint('refer'),
     onSelect: () => onReferSelection(barKind === 'point'
       ? { blocks: [], range: null, atMs: timeMsRef.current }
       : { blocks: selectedBlocks, range: range ?? null, atMs: null }),
@@ -3862,7 +3859,7 @@ export const Timeline = React.memo(function Timeline({
               onClick={() => history.step('undo')}
               disabled={!history.canUndo}
               label={t('history.undo')}
-              hint={shortcutHint('Z', { mod: true })}
+              hint={keyHint('undo')}
             >
               <Undo2 size={16} />
             </ToolButton>
@@ -3870,7 +3867,7 @@ export const Timeline = React.memo(function Timeline({
               onClick={() => history.step('redo')}
               disabled={!history.canRedo}
               label={t('history.redo')}
-              hint={shortcutHint('Z', { mod: true, shift: true })}
+              hint={keyHint('redo')}
             >
               <Redo2 size={16} />
             </ToolButton>
@@ -3882,7 +3879,7 @@ export const Timeline = React.memo(function Timeline({
         ) : null}
 
         {onAddMarker ? (
-          <ToolButton onClick={onAddMarker} disabled={!playable} label={t('editorTools.markerAdd')} hint={shortcutHint('M')}>
+          <ToolButton onClick={onAddMarker} disabled={!playable} label={t('editorTools.markerAdd')} hint={keyHint('add-marker')}>
             <MarkerGlyph size={16} />
           </ToolButton>
         ) : null}
@@ -3893,7 +3890,7 @@ export const Timeline = React.memo(function Timeline({
             /* lit only with a selection: a disabled button already says "this acts on the selection" */
             disabled={!selectedBlocks.some((b) => drag.can(b).resize)}
             label={t('timeline.split')}
-            hint={shortcutHint('B', { mod: true })}
+            hint={keyHint('split')}
           >
             <Scissors size={16} />
           </ToolButton>
@@ -3963,7 +3960,7 @@ export const Timeline = React.memo(function Timeline({
           onClick={() => zoomBy(1 / ZOOM_STEP)}
           disabled={!(hasLanes && spanMs > 0) || viewZoom <= zoomMinOf(spanMs)}
           label={t('timeline.zoomOut')}
-          hint={shortcutHint('-', { mod: true })}
+          hint={keyHint('zoom-out')}
         >
           <ZoomOut size={15} />
         </ToolButton>
@@ -3985,7 +3982,7 @@ export const Timeline = React.memo(function Timeline({
           onClick={() => zoomBy(ZOOM_STEP)}
           disabled={!(hasLanes && spanMs > 0) || viewZoom >= zoomMaxOf(spanMs)}
           label={t('timeline.zoomIn')}
-          hint={shortcutHint('+', { mod: true })}
+          hint={keyHint('zoom-in')}
         >
           <ZoomIn size={15} />
         </ToolButton>
@@ -4336,7 +4333,7 @@ export const Timeline = React.memo(function Timeline({
       {shownRange && hasLanes ? (() => {
         const fromX = shownRange.startMs * pxPerMs - scrollLeft;
         const width = Math.max(1, (shownRange.endMs - shownRange.startMs) * pxPerMs);
-        const label = rangeLabel(shownRange, rangeRef ? shortcutHint('L', { mod: true }) : undefined);
+        const label = rangeLabel(shownRange, rangeRef ? keyHint('refer') : undefined);
         return (
           <>
             <div className="pointer-events-none absolute z-[24] overflow-hidden" style={{ left: headW, right: 0, top: TOOLBAR_H, bottom: H_SCROLL_H }}>
@@ -4601,11 +4598,12 @@ function ModePicker({
   mode, onPick,
 }: { mode: TimelineMode; onPick: (m: TimelineMode) => void }) {
   const t = useT();
+  const keyHint = useKeyHint();
   const [open, setOpen] = React.useState(false);
 
-  const items: { id: TimelineMode; label: string; key: string; icon: React.ReactNode }[] = [
-    { id: 'select', label: t('timeline.modeSelect'), key: 'A', icon: <MousePointer2 size={16} /> },
-    { id: 'split', label: t('timeline.modeSplit'), key: 'B', icon: <SplitSquareHorizontal size={16} /> },
+  const items: { id: TimelineMode; label: string; key: string | undefined; icon: React.ReactNode }[] = [
+    { id: 'select', label: t('timeline.modeSelect'), key: keyHint('select-mode'), icon: <MousePointer2 size={16} /> },
+    { id: 'split', label: t('timeline.modeSplit'), key: keyHint('split-mode'), icon: <SplitSquareHorizontal size={16} /> },
   ];
   const current = items.find((i) => i.id === mode) ?? items[0]!;
 
@@ -4616,7 +4614,7 @@ function ModePicker({
       <ToolButton
         onClick={() => onPick(mode === 'split' ? 'select' : 'split')}
         label={mode === 'split' ? t('timeline.modeSelect') : t('timeline.modeSplit')}
-        hint={mode === 'split' ? 'A' : 'B'}
+        hint={mode === 'split' ? keyHint('select-mode') : keyHint('split-mode')}
       >
         {current.icon}
       </ToolButton>

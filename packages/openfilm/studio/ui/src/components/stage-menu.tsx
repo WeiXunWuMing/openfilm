@@ -15,6 +15,8 @@ import type { ContextMenuEntry } from '@/components/ContextMenu';
 import type { FilmDoc } from '@/lib/film';
 import type { OverrideGeometry } from '@/lib/film-overrides';
 import { shortcutHint } from '@/lib/shortcut-hint';
+import { hintOf } from '@/lib/keymap';
+import { currentKeymap, MAC } from '@/lib/keymap-store';
 import type { AlignEdge } from '@/lib/stage-gesture';
 import { recoverableLayers, type RecoverableLayer } from '@/lib/stage-layers';
 import type { StageElement } from '@/lib/stage-types';
@@ -158,7 +160,7 @@ export function stageMenu(el: StageElement, ctx: StageMenuContext, actions: Stag
       m.push({ id: 'export', label: t('timeline.menuExportClip'), icon: <Download size={14} />, onSelect: () => exportClip(id) });
     }
     m.sep();
-    m.push({ id: 'delete', label: t('timeline.removeBlock'), icon: <Trash2 size={14} />, danger: true, shortcut: '⌫', disabled: trackLocked, hint: lockedHint, onSelect: () => clip.remove(clipLoc) });
+    m.push({ id: 'delete', label: t('timeline.removeBlock'), icon: <Trash2 size={14} />, danger: true, shortcut: hintOf(currentKeymap(), 'remove', MAC), disabled: trackLocked, hint: lockedHint, onSelect: () => clip.remove(clipLoc) });
     return m.done();
   }
 

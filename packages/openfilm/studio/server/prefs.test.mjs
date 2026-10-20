@@ -29,3 +29,30 @@ test('what a newer OpenFilm keeps in prefs.json stays when this one writes it', 
     if (was === undefined) delete process.env.OPENFILM_HOME; else process.env.OPENFILM_HOME = was;
   }
 });
+
+test('the keyboard shortcuts are kept as given, in shape only; none is null', () => {
+  assert.equal(prefsOf(null).keys, null);
+  assert.equal(prefsOf({ keys: 'premiere' }).keys, null);
+  assert.equal(prefsOf({ keys: { scheme: '../x' } }).keys, null);
+  const keys = { scheme: 'custom1', custom: { custom1: { base: 'premiere', keys: { split: ['mod+e'], refer: [] } } } };
+  assert.deepEqual(prefsOf({ keys }).keys, keys);
+  const odd = prefsOf({ keys: { scheme: 'fcp', custom: { custom1: { base: 'fcp', keys: { split: ['mod+e', 7, 'x'.repeat(41)] } }, custom7: { base: 'fcp', keys: {} }, custom2: { keys: {} } } } }).keys;
+  assert.deepEqual(odd, { scheme: 'fcp', custom: { custom1: { base: 'fcp', keys: { split: ['mod+e'] } } } });
+});
+
+test('the keyboard shortcuts written are read back, and the rest of prefs.json stays', () => {
+  const home = mkdtempSync(join(tmpdir(), 'of-prefs-'));
+  const was = process.env.OPENFILM_HOME;
+  process.env.OPENFILM_HOME = home;
+  try {
+    writePrefs({ proxies: { on: false } });
+    const keys = { scheme: 'custom2', custom: { custom2: { base: 'fcp', keys: { loop: ['shift+l'] } } } };
+    assert.deepEqual(writePrefs({ keys }).keys, keys);
+    const written = JSON.parse(readFileSync(join(home, 'prefs.json'), 'utf8'));
+    assert.deepEqual(written.keys, keys);
+    assert.equal(written.proxies.on, false);
+    assert.deepEqual(writePrefs({ seenVersion: '0.2.3' }).keys, keys, 'another change leaves them');
+  } finally {
+    if (was === undefined) delete process.env.OPENFILM_HOME; else process.env.OPENFILM_HOME = was;
+  }
+});

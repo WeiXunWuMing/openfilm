@@ -14,7 +14,8 @@
 import React from 'react';
 import { Captions, Combine, EyeOff, Pencil, Plus, Scissors, Trash2 } from 'lucide-react';
 import { useT } from '@/i18n';
-import { shortcutHint } from '@/lib/shortcut-hint';
+import { hintOf } from '@/lib/keymap';
+import { currentKeymap, keyAction, MAC } from '@/lib/keymap-store';
 import {
   addSpan,
   canMerge,
@@ -236,7 +237,8 @@ export const SubtitleRow = React.forwardRef<SubtitleRowHandle, {
       const picked = list.find((c) => cueKey(c) === selected);
       const mod = e.metaKey || e.ctrlKey;
       const take = () => { e.preventDefault(); e.stopPropagation(); };
-      if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+      const action = keyAction(e);
+      if (action === 'split') {
         take();
         if (e.repeat) return;
         const at = playheadMs();
@@ -244,8 +246,9 @@ export const SubtitleRow = React.forwardRef<SubtitleRowHandle, {
         if (cue) split(cue, at);
         return;
       }
-      if (!picked || mod || e.altKey) return;
-      if (e.key === 'Delete' || e.key === 'Backspace') { take(); remove(picked); return; }
+      if (!picked) return;
+      if (action === 'remove' || action === 'ripple-delete') { take(); remove(picked); return; }
+      if (mod || e.altKey) return;
       if (e.key === 'Enter') { take(); setEditing({ key: cueKey(picked), text: picked.text }); return; }
       if (e.key === 'Escape') { setSelected(null); }
     };
@@ -328,12 +331,12 @@ export const SubtitleRow = React.forwardRef<SubtitleRowHandle, {
     const next = list[list.indexOf(cue) + 1];
     setMenu({
       x: e.clientX, y: e.clientY, items: [
-        { id: 'split', label: t('subtitleRow.split'), icon: <Scissors size={14} />, shortcut: shortcutHint('B', { mod: true }),
+        { id: 'split', label: t('subtitleRow.split'), icon: <Scissors size={14} />, shortcut: hintOf(currentKeymap(), 'split', MAC),
           disabled: !canSplitAt(cue, at), hint: t('subtitleRow.splitWhere'), onSelect: () => split(cue, at) },
         { id: 'merge', label: t('subtitleRow.merge'), icon: <Combine size={14} />, disabled: !canMerge(cue, next), hint: t('subtitleRow.mergeWhy'), onSelect: () => merge(cue) },
         { id: 'edit', label: t('subtitleRow.edit'), icon: <Pencil size={14} />, shortcut: '↵', onSelect: () => setEditing({ key: cueKey(cue), text: cue.text }) },
         { id: 'sep', separator: true },
-        { id: 'delete', label: t('subtitleRow.delete'), icon: <Trash2 size={14} />, danger: true, shortcut: '⌫', onSelect: () => remove(cue) },
+        { id: 'delete', label: t('subtitleRow.delete'), icon: <Trash2 size={14} />, danger: true, shortcut: hintOf(currentKeymap(), 'remove', MAC), onSelect: () => remove(cue) },
       ],
     });
   };

@@ -9,8 +9,6 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import { X, Settings2, Keyboard, Sun, Moon, Monitor, Plug, Boxes, Bot, Search, SquareTerminal, Loader2, SlidersHorizontal } from 'lucide-react';
 import { LANGUAGES, phrasesUnder, useLanguage, useLanguageChoice, useT, type LanguageChoice } from '@/i18n';
-import { shortcutHint } from '@/lib/shortcut-hint';
-import { SHORTCUTS, type ShortcutKey } from '@/lib/timeline-keys';
 import { studioHost, type HostDeveloper, type HostUpdateState } from '@/lib/host';
 import { showWhatsNew } from '@/lib/whats-new';
 import { usePreviewPrefs, writePreviewPref } from '@/lib/preview-prefs';
@@ -22,6 +20,7 @@ import { DiagnosticsGroup } from './DiagnosticsGroup';
 import { ModelsSection } from './ModelsSection';
 import { ProvidersSection } from './ProvidersSection';
 import { SettingsSelect } from './SettingsSelect';
+import { ShortcutsSection } from './ShortcutsSection';
 import { SettingsButton, SettingsGroup, SettingsItem, SettingsPage, SettingsSegmented, SettingsSwitch } from './ui';
 import { useThemeMode, type ThemeMode } from './theme';
 import { StorageGroup } from './StorageGroup';
@@ -512,65 +511,6 @@ function DeveloperSection() {
           />
         </SettingsGroup>
       ) : null}
-    </SettingsPage>
-  );
-}
-
-/**
- * The keys, as lib/timeline-keys lists them beside the code that reads them (playback, marks, editing, the view),
- * then the picture's own (FilmStageSelect).
- */
-function ShortcutsSection() {
-  const t = useT();
-  const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
-  const alt = mac ? '⌥' : 'Alt';
-  const k = (key: string, opts?: { mod?: boolean; shift?: boolean }) => shortcutHint(key, opts);
-  /* a key as this platform writes it: ⌘⇧B on a Mac, Ctrl+Shift+B elsewhere; ⌫ is Backspace off a Mac */
-  const keyText = (key: ShortcutKey): string => {
-    const name = !mac && key.key === '⌫' ? 'Backspace' : key.key;
-    const mods = [key.ctrl ? (mac ? '⌃' : 'Ctrl') : '', key.mod ? (mac ? '⌘' : 'Ctrl') : '', key.alt ? alt : '', key.shift ? (mac ? '⇧' : 'Shift') : ''].filter(Boolean);
-    return mac ? `${mods.join('')}${name}` : [...mods, name].filter(Boolean).join('+');
-  };
-
-  const groups: Array<{ title: string; items: Array<{ label: string; keys: string[] }> }> = [
-    ...(studioHost?.settings ? [{ title: t('settings.sections.general'), items: [{ label: t('settings.title'), keys: [k(',', { mod: true })] }] }] : []),
-    ...SHORTCUTS.map((group) => ({
-      title: t(`settings.shortcuts.${group.group}`),
-      items: group.rows.map((row) => ({ label: t(`settings.shortcuts.${row.label}`), keys: row.keys.map(keyText) })),
-    })),
-    {
-      title: t('settings.shortcuts.groupCanvas'),
-      items: [
-        { label: t('settings.shortcuts.nudge'), keys: ['↑', '↓', '←', '→'] },
-        { label: t('settings.shortcuts.nudgeFast'), keys: [k('↑', { shift: true }), k('↓', { shift: true }), k('←', { shift: true }), k('→', { shift: true })] },
-        { label: t('settings.shortcuts.editText'), keys: ['Enter'] },
-        { label: t('settings.shortcuts.commitText'), keys: [k('Enter', { mod: true })] },
-        { label: t('settings.shortcuts.cancelText'), keys: ['Esc'] },
-      ],
-    },
-  ];
-
-  return (
-    <SettingsPage note={t('settings.shortcuts.hint')}>
-      {groups.map((group) => (
-        <SettingsGroup key={group.title} title={group.title}>
-          {group.items.map((item) => (
-            <div key={item.label} className="flex min-h-[52px] items-center justify-between gap-6 py-2.5">
-              <span className="text-[15px] text-[var(--text)]">{item.label}</span>
-              <span className="flex max-w-[55%] shrink-0 flex-wrap items-center justify-end gap-1">
-                {item.keys.map((key, j) => (
-                  <React.Fragment key={key}>
-                    {j > 0 ? <span className="px-0.5 text-[13px] text-[var(--text-faint)]">/</span> : null}
-                    <kbd className="inline-flex h-7 min-w-7 items-center justify-center rounded-[6px] border border-[var(--border)] px-1.5 font-sans text-[13px] text-[var(--text-dim)]">
-                      {key}
-                    </kbd>
-                  </React.Fragment>
-                ))}
-              </span>
-            </div>
-          ))}
-        </SettingsGroup>
-      ))}
     </SettingsPage>
   );
 }

@@ -33,7 +33,9 @@
  * point winning. What is written is always film.html: a clip's `box`, a page's `overrides`, through the callbacks.
  */
 import * as React from 'react';
-import { isSelectAll as isSelectAllKey, type KeyLike } from '@/lib/select-all-key';
+import { currentKeymap, keyAction } from '@/lib/keymap-store';
+import { hintOf } from '@/lib/keymap';
+import type { KeyPress } from '@/lib/timeline-keys';
 import { doubleClickAim, keepPress, type Press } from '@/lib/double-press';
 import {
   AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalDistributeCenter,
@@ -77,7 +79,6 @@ import { regionBox, regionClipIds, regionTexts } from '@/lib/studio-refs';
 import type { StageBox } from '@/lib/host';
 import { samePictureMarks, type PictureMarks } from '@/lib/chat-marks';
 import { distributeShifts } from '@/lib/selection-toolbar';
-import { shortcutHint } from '@/lib/shortcut-hint';
 import { trackLockedAt } from '@/lib/track-lock';
 import {
   compactScale, type NodeOverride, type StageElement, type StageElementStyle, type StageGeometry, type StageNodeKind,
@@ -111,8 +112,8 @@ type PressEvent = Pick<PointerEvent, 'button' | 'timeStamp' | 'pointerId' | 'tar
 /** Controls in the viewer's picture area: a press on one is theirs. */
 const CONTROLS = 'button, a, input, textarea, select, [role="button"], [role="slider"], [role="menu"], [contenteditable="true"]';
 const regionKeyHeld = (e: { metaKey: boolean; ctrlKey: boolean }) => (MAC ? e.metaKey : e.ctrlKey);
-/** ⌘A (Ctrl+A elsewhere): every layer on the picture selected. */
-const isSelectAll = (e: KeyLike) => isSelectAllKey(e, MAC);
+/** ⌘A (Ctrl+A elsewhere; lib/keymap): every layer on the picture selected. */
+const isSelectAll = (e: KeyPress) => keyAction(e) === 'select-all';
 /** Arrow keys write what they moved this long after the last one (held down they come thirty a second). */
 const NUDGE_WRITE_MS = 350;
 const NO_CROP: Crop = [0, 0, 0, 0];
@@ -2483,7 +2484,7 @@ function FilmStageSelectImpl({
     : barKind === 'layers' ? `layers:${(multi ?? []).map((i) => i.layer.handle).join(',')}`
       : barKind === 'clip' ? `clip:${heldEl?.clipLoc ?? ''}` : `layer:${heldEl?.loc ?? ''}:${picked?.layer?.handle ?? ''}`;
   const barLead = barKind && onRefer ? {
-    id: 'refer', label: t('selectionBar.addToChat'), icon: <MessageSquarePlus size={14} />, shortcut: shortcutHint('L', { mod: true }),
+    id: 'refer', label: t('selectionBar.addToChat'), icon: <MessageSquarePlus size={14} />, shortcut: hintOf(currentKeymap(), 'refer', MAC),
     onSelect: () => onRefer(pickedItems()),
   } : null;
   const barLabel = barKind === 'layers' ? t('selectionBar.layers').replace('{n}', String(multi?.length ?? 0)) : undefined;

@@ -1,84 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { keyCommandOf, letterOf, loopBack, playStart, SHORTCUTS, shuttleRate, type KeyPress } from './timeline-keys.ts';
-
-const press = (key: string, mods: Partial<KeyPress> = {}): KeyPress => ({ key, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...mods });
-const mac = (key: string, mods: Partial<KeyPress> = {}) => keyCommandOf(press(key, mods), true);
-const win = (key: string, mods: Partial<KeyPress> = {}) => keyCommandOf(press(key, mods), false);
-
-test('the keys', () => {
-  assert.equal(mac('j'), 'shuttle-back');
-  assert.equal(mac('k'), 'shuttle-stop');
-  assert.equal(mac('L'), 'shuttle-forward');
-  assert.equal(mac('i'), 'mark-in');
-  assert.equal(mac('o'), 'mark-out');
-  assert.equal(mac('x'), 'clear-range');
-  assert.equal(mac('I', { shiftKey: true }), 'go-in');
-  assert.equal(mac('O', { shiftKey: true }), 'go-out');
-  assert.equal(mac('L', { shiftKey: true }), 'loop');
-  assert.equal(mac(' ', { shiftKey: true }), 'play-range');
-  assert.equal(mac(' '), null, 'Space alone is play / pause, the editor\'s own');
-  assert.equal(mac('b', { metaKey: true }), 'split');
-  assert.equal(mac('b', { metaKey: true, shiftKey: true }), 'split-all');
-  assert.equal(mac('k', { metaKey: true }), 'split-all');
-  assert.equal(mac('x', { metaKey: true }), 'cut');
-  assert.equal(mac('d', { metaKey: true }), 'duplicate');
-  assert.equal(mac('ArrowUp'), 'prev-cut');
-  assert.equal(mac('ArrowDown'), 'next-cut');
-  assert.equal(mac('ArrowLeft'), 'frame-back');
-  assert.equal(mac('ArrowRight', { shiftKey: true }), 'jump-forward');
-  assert.equal(mac('ArrowLeft', { altKey: true }), 'nudge-back');
-  assert.equal(mac('ArrowRight', { altKey: true }), 'nudge-forward');
-  assert.equal(mac('Z', { shiftKey: true }), 'zoom-fit');
-  assert.equal(mac('n'), 'toggle-snap');
-  /* the switches: P (and ⇧N) the main-track magnet, ~ linkage, S the preview axis */
-  assert.equal(mac('N', { shiftKey: true }), 'toggle-magnet');
-  assert.equal(mac('p'), 'toggle-magnet');
-  assert.equal(mac('`'), 'toggle-linkage');
-  assert.equal(mac('~', { shiftKey: true }), 'toggle-linkage');
-  assert.equal(mac('s'), 'toggle-preview-axis');
-  assert.equal(mac('S', { shiftKey: true, ctrlKey: true }), 'detach-audio');
-  assert.equal(mac('q'), 'ripple-start');
-  assert.equal(mac('w'), 'ripple-end');
-  assert.equal(mac(','), 'insert-source');
-  assert.equal(mac('.'), 'overwrite-source');
-  assert.equal(mac('Home'), 'start');
-  assert.equal(mac('End'), 'end');
-});
-
-test('M adds a marker, ⇧M and ⌥M go to the next and the one before (⌥M types µ on a Mac)', () => {
-  assert.equal(mac('m'), 'add-marker');
-  assert.equal(mac('M', { shiftKey: true }), 'next-marker');
-  assert.equal(keyCommandOf({ ...press('µ', { altKey: true }), code: 'KeyM' }, true), 'prev-marker');
-  assert.equal(win('m', { altKey: true }), 'prev-marker');
-  assert.equal(mac('m', { metaKey: true }), null);
-  assert.equal(mac('m', { altKey: true, shiftKey: true }), 'prev-marker', '⌥⇧M too');
-});
-
-test('the switch, range, speed, sound and attribute keys: P, ~, S, ⇧X, ⌥X, ⌘R, ⇧⌃S, ⌘⇧C, ⌘⇧V', () => {
-  assert.equal(mac('p'), 'toggle-magnet');
-  assert.equal(keyCommandOf({ ...press('`'), code: 'Backquote' }, true), 'toggle-linkage');
-  assert.equal(mac('s'), 'toggle-preview-axis');
-  assert.equal(mac('X', { shiftKey: true }), 'range-clip');
-  assert.equal(keyCommandOf({ ...press('≈', { altKey: true }), code: 'KeyX' }, true), 'clear-range');
-  assert.equal(mac('r', { metaKey: true }), 'speed');
-  assert.equal(mac('S', { ctrlKey: true, shiftKey: true }), 'detach-audio');
-  assert.equal(win('S', { ctrlKey: true, shiftKey: true }), 'detach-audio');
-  assert.equal(mac('C', { metaKey: true, shiftKey: true }), 'copy-attrs');
-  assert.equal(mac('V', { metaKey: true, shiftKey: true }), 'paste-attrs');
-  assert.equal(keyCommandOf({ ...press('['), code: 'BracketLeft' }, true), 'select-left');
-  assert.equal(keyCommandOf({ ...press(']'), code: 'BracketRight' }, true), 'select-right');
-});
-
-test('keys that are not the editor\'s stay the browser\'s, and Ctrl is the modifier off a Mac', () => {
-  assert.equal(mac('b', { ctrlKey: true }), null, 'Ctrl+B on a Mac is not ⌘B');
-  assert.equal(win('b', { ctrlKey: true }), 'split');
-  assert.equal(win('b', { metaKey: true }), null);
-  assert.equal(mac('c', { metaKey: true }), null, 'copy is the timeline\'s own');
-  assert.equal(mac('z', { metaKey: true }), null, 'undo is the editor\'s own');
-  assert.equal(mac('j', { altKey: true }), null);
-  assert.equal(mac('ArrowUp', { shiftKey: true }), null);
-});
+import { letterOf, loopBack, playStart, shuttleRate } from './timeline-keys.ts';
 
 test('a letter is read by what it types, or where it sits when it types no Latin letter', () => {
   assert.equal(letterOf({ key: 'J', code: 'KeyJ' }), 'j');
@@ -86,13 +8,6 @@ test('a letter is read by what it types, or where it sits when it types no Latin
   assert.equal(letterOf({ key: 'a', code: 'KeyQ' }), 'a');
   /* Korean: ㅓ is on J */
   assert.equal(letterOf({ key: 'ㅓ', code: 'KeyJ' }), 'j');
-  assert.equal(keyCommandOf({ ...press('ㅓ'), code: 'KeyJ' }, true), 'shuttle-back');
-});
-
-test('every key in Settings\' list is one the editor takes', () => {
-  const rows = SHORTCUTS.flatMap((g) => g.rows);
-  assert.ok(rows.length > 30);
-  assert.equal(new Set(rows.map((r) => r.label)).size, rows.length, 'no row twice');
 });
 
 test('J / K / L: L faster each time up to 4×, J the same backwards, K stops; the other way starts at 1×', () => {
