@@ -22,6 +22,19 @@ const MODELS = {
 };
 const FORMAT = 'mp3_44100_128';
 
+/** @param {Record<string, unknown>} args */
+export function elevenlabsVoiceSettings(args) {
+  /** @type {Record<string, number>} */
+  const settings = {};
+  for (const [arg, field] of [['stability', 'stability'], ['similarity', 'similarity_boost']]) {
+    if (args[arg] === undefined) continue;
+    const value = number(args[arg]);
+    if (value === null || value < 0 || value > 1) throw new Error(`ElevenLabs ${arg} must be a number between 0 and 1.`);
+    settings[field] = value;
+  }
+  return Object.keys(settings).length ? settings : undefined;
+}
+
 /** @type {Provider} */
 export default {
   id: 'elevenlabs',
@@ -42,9 +55,10 @@ export default {
     if (verb === 'tts') {
       const voice = needed(args, 'voice');
       const said = needed(args, 'text');
+      const settings = elevenlabsVoiceSettings(args);
       const path = landing('audio/vo', args.out, 'mp3');
       const model = modelOf(MODELS, 'tts', ctx);
-      const body = await (await post(`/v1/text-to-speech/${encodeURIComponent(voice)}/with-timestamps?output_format=${FORMAT}`, { text: said, model_id: model })).json();
+      const body = await (await post(`/v1/text-to-speech/${encodeURIComponent(voice)}/with-timestamps?output_format=${FORMAT}`, { text: said, model_id: model, ...(settings ? { voice_settings: settings } : {}) })).json();
       if (typeof body?.audio_base64 !== 'string') throw new Error(`${NAME} answered without audio.`);
       const bytes = new Uint8Array(Buffer.from(body.audio_base64, 'base64'));
       const dur = mp3Seconds(bytes);

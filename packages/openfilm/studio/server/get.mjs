@@ -69,7 +69,8 @@ export const VERBS = /** @type {Record<string, VerbSpec>} */ ({
   tts: {
     help: 'Voice-over: one line spoken. Returns src, dur and its transcript: a WebVTT of the text in pause-separated cues, in source seconds. Its word timing is kept, so never run asr on it.',
     dir: 'assets/audio/vo', timeoutSec: 300,
-    options: { out, text: { value: 'text', required: true }, voice: { value: 'voiceId', required: true } },
+    options: { out, text: { value: 'text', required: true }, voice: { value: 'voiceId', required: true },
+      stability: { value: '0..1', min: 0, max: 1 }, similarity: { value: '0..1', min: 0, max: 1 } },
   },
   sfx: {
     help: 'A sound effect. Returns src, its measured dur and, when measured, attack (seconds into the file where the hit is) and peakDb. --sec is a request: the dur returned is what it is.',

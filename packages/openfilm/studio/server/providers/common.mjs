@@ -14,7 +14,7 @@ export const serviceUrl = (/** @type {string} */ name, /** @type {string} */ fal
 /**
  * `fetch` that answers only when the service said yes. Otherwise it throws a sentence naming the service and its
  * reason, with the key blanked out wherever the service echoed it.
- * @param {string} service @param {string} url @param {RequestInit} init @param {RunContext} ctx
+ * @param {string} service @param {string} url @param {RequestInit} init @param {Pick<RunContext, 'key' | 'signal'>} ctx
  */
 export async function call(service, url, init, ctx) {
   let res;

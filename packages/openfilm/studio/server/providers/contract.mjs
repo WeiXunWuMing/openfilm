@@ -7,7 +7,7 @@
  *
  * Verbs (the same flags whoever serves them; a provider takes the ones it can honor and says so for the rest):
  *   voice         list voices                  --language --gender --prompt --limit
- *   tts           voice-over                   --out --text --voice
+ *   tts           voice-over                   --out --text --voice --stability --similarity (ElevenLabs, 0..1)
  *   sfx           sound effect                 --out --prompt --sec
  *   music         music                        --out --prompt --sec
  *   asr           transcribe a project file    --src --force

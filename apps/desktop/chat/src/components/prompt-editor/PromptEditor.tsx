@@ -302,7 +302,7 @@ function SubmitPlugin({ onSubmit }: { onSubmit?: () => void }) {
     return editor.registerCommand(
       KEY_ENTER_COMMAND,
       (event) => {
-        if (!event || event.shiftKey || event.isComposing || editor.isComposing()) return false;
+        if (!event || event.shiftKey || event.isComposing || event.keyCode === 229 || editor.isComposing()) return false;
         event.preventDefault();
         onSubmit();
         return true;

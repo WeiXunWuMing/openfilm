@@ -1808,5 +1808,20 @@ body.tl-pinning, body.tl-pinning * { cursor: crosshair !important; }
   background: #f5a524;
 }
 
+[data-generation-kind] { --generation-ink: color-mix(in srgb, var(--generation-color) 70%, var(--text)); }
+[data-generation-kind='subtitles'] { --generation-color: var(--tint-blue); }
+[data-generation-kind='emphasis'] { --generation-color: var(--tint-orange); }
+[data-generation-kind='voiceover'],
+[data-generation-kind='voice'] { --generation-color: var(--tint-purple); }
+[data-generation-kind='music'] { --generation-color: var(--tint-green); }
+.generation-option[data-generation-active] {
+  border-color: color-mix(in srgb, var(--generation-color) 45%, transparent);
+  background: color-mix(in srgb, var(--generation-color) 10%, transparent);
+}
+.generation-requirement {
+  border-inline-start: 2px solid var(--generation-color);
+  background: color-mix(in srgb, var(--generation-color) 7%, transparent);
+}
+
 /* the desktop chat page: the column fills the view */
 #root { height: 100%; }

@@ -6,7 +6,7 @@
  * (lib/local-agent-run's saved turns).
  */
 import React from 'react';
-import { ArrowDown, Blocks, Coins, CornerDownLeft, LibraryBig, Loader2, Plus, ShieldQuestion, Square, SquareSlash, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Blocks, Coins, LibraryBig, Loader2, Plus, ShieldQuestion, Square, SquareSlash, X } from 'lucide-react';
 import { buildPromptDisplay, type Turn } from '@openfilm/shared';
 import { useT, useUiLocale } from '@/i18n';
 import { ConversationSessionBar } from '@/components/ConversationSessionBar';
@@ -16,6 +16,8 @@ import { AttachmentPreview, type AttachmentPreviewItem } from '@/components/Atta
 import { ATTACHMENT_CARD, ATTACHMENT_THUMB, AttachmentCardBody, PlayMark } from '@/components/AttachmentCard';
 import { attachmentPlace } from '@/lib/attachment-place';
 import { ModelPopover } from '@/components/ModelPopover';
+import { GenerationOptions } from '@/components/GenerationOptions';
+import { EMPTY_GENERATION, GENERATION_KINDS, generationPrompt, generationSummary, withGenerationPrompt, type GenerationOptions as GenerationSelection } from '@/lib/generation-options';
 import { AddSkillDialog, type PickedSkill } from '@/components/AddSkill';
 import { SKILLS_CHANGED } from 'openfilm/studio-ui/lib/project-sources.ts';
 import { CardActions, CardButton, ComposerCard } from '@/components/ComposerCard';
@@ -272,6 +274,11 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
     return () => seen.disconnect();
   }, []);
   const [followUp, setFollowUp] = React.useState('');
+  const [generation, setGeneration] = React.useState<GenerationSelection>(EMPTY_GENERATION);
+  const changeGeneration = (next: GenerationSelection) => {
+    setGeneration(next);
+    setFollowUpError(null);
+  };
   const [followUpRefs, setFollowUpRefs] = React.useState<PromptReference[]>([]);
   /** what the person pointed at in Studio for this message, by pill id */
   const [studioRefs, setStudioRefs] = React.useState<Map<string, StudioRef>>(() => new Map());
@@ -284,7 +291,7 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
   const [dropping, setDropping] = React.useState(false);
   /** files of the project pointed at with @ (their pills turn back into their paths when sent) */
   const [fileRefs, setFileRefs] = React.useState<PromptReference[]>([]);
-  const followUpFilled = followUp.trim().length > 0;
+  const followUpFilled = followUp.trim().length > 0 || GENERATION_KINDS.some((kind) => generation[kind]);
   /* the composer's button stops the turn while it runs, until something is written to send */
   const stopping = active && !followUpFilled;
   /** skills named with the Skills button or `/` (each pill turns into the skill's name, its SKILL.md after the message) */
@@ -693,7 +700,9 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
     setQueued(false);
     /* the sentence as the agent reads it: a pill becomes "[n: name]", and what each number is follows, in a block */
     const used: StudioRef[] = [];
-    const instruction = resolvePromptReferences(followUp, (pillId, index) => {
+    const requirements = generationPrompt(generation, t);
+    const prompt = [followUp.trim(), generationSummary(generation, t)].filter(Boolean).join('\n\n') || t('generation.apply');
+    const instruction = resolvePromptReferences(prompt, (pillId, index) => {
       const ref = studioRefs.get(pillId);
       if (!ref) return null;
       used[index - 1] = ref;
@@ -705,10 +714,12 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
     const blocker = attachmentBlocker(composerFiles.files, t);
     if (blocker) { setFollowUpError(blocker); return; }
     setFollowUpError(null);
-    const promptDisplay = buildPromptDisplay(followUp, followUpRefs);
+    const promptDisplay = buildPromptDisplay(prompt, followUpRefs);
     thread.scrollToBottom({ smooth: true });
     composerRef.current?.clear();
     setFollowUp('');
+    setGeneration(EMPTY_GENERATION);
+    requestAnimationFrame(() => composerRef.current?.focus());
     setFollowUpRefs([]);
     setStudioRefs(new Map());
     setFileRefs([]);
@@ -726,7 +737,7 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
     /* the pictures sent: the references' first, then the attached ones while there is room (the rest by their path) */
     const prepared = withFolders.then((ready) => Promise.all([referencePictures(ready, { project: project.path, turnId: id }), skillTexts])
       .then(async ([{ pictures, images }, skills]) => ({
-        text: said + studioReferencesText(ready, { stage, pictures }) + skills.map((s) => `\n\n${s.text}`).join(''),
+        text: withGenerationPrompt(said + studioReferencesText(ready, { stage, pictures }) + skills.map((s) => `\n\n${s.text}`).join(''), requirements),
         images: [...images, ...await attachedPictures(files, PROMPT_PICTURES_MAX - images.length)],
       })));
     const opened = openTurn(id, instruction, promptDisplay ?? null, turnAttachments(files));
@@ -852,7 +863,7 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
           </div>
         )}
         {openedFile ? <AttachmentPreview item={openedFile} onClose={() => setOpenedFile(null)} /> : null}
-        <div className="flex items-end gap-1 py-2.5 pl-3.5 pr-2">
+        <div className="flex items-end gap-2 pb-2 pt-3 pl-3.5 pr-2.5">
           <div className="min-w-0 flex-1">
             <PromptEditor
               ref={composerRef}
@@ -867,8 +878,8 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
               removeLabel={t('library.removeReference')}
               placeholder={t(blank ? 'project.composerPlaceholderBlank' : 'project.composerPlaceholder')}
               minHeight={22}
-              maxHeight={158}
-              contentClassName="text-[14px] leading-[22px] text-[var(--chat-text)]"
+              maxHeight={220}
+              contentClassName="py-1 text-[14px] leading-[22px] text-[var(--chat-text)]"
               onPasteFiles={(files) => composerFiles.add(files)}
               mentions={{ providers: mentionProviders, label: t('mention.menu'), onOpen: loadMentionFiles }}
               commands={commandMenu}
@@ -880,13 +891,14 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
               type="button"
               onClick={stopping ? () => { if (asset) void cancelLocalAgentTurn(asset.id); } : submitFollowUp}
               disabled={stopping ? false : !followUpFilled}
-              className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[6px] text-[var(--text-dim)] transition-colors duration-150 hover:bg-[var(--bg-hover)] hover:text-[var(--text)] disabled:cursor-not-allowed disabled:text-[var(--text-faint)] disabled:hover:bg-transparent"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-[var(--text)] text-[var(--bg)] transition-opacity duration-150 hover:opacity-80 disabled:cursor-not-allowed disabled:bg-[var(--surface-2)] disabled:text-[var(--text-faint)]"
               aria-label={stopping ? t('project.stop') : t('project.sendFollowUp')}
             >
-              {stopping ? <Square size={14} /> : <CornerDownLeft size={14} />}
+              {stopping ? <Square size={14} /> : <ArrowUp size={16} />}
             </button>
           </Tooltip>
         </div>
+        <GenerationOptions value={generation} onChange={changeGeneration} onFocusComposer={() => composerRef.current?.focus()} onSubmit={submitFollowUp} />
       </div>
       <div className="flex items-center gap-0.5 px-0.5">
         <ModelPopover placement="top" align="start" />

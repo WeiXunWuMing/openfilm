@@ -145,6 +145,13 @@ test('tts: the file lands, its timed words a WebVTT beside it, and the receipt s
   assert.equal(calls.at(-1).path, '/v2/voices');
 });
 
+test('tts accepts per-turn voice settings and passes them to ElevenLabs', async () => {
+  const root = project();
+  await runGet(root, 'tts', { out: 'tuned', text: SAID, voice: 'v-1', stability: '0.4', similarity: '0.85' });
+  assert.deepEqual(JSON.parse(calls.at(-1).body).voice_settings, { stability: 0.4, similarity_boost: 0.85 });
+  await assert.rejects(runGet(root, 'tts', { out: 'bad', text: SAID, voice: 'v-1', stability: '2' }), /stability/);
+});
+
 test('a file is never written through a link the project brings under assets/', { skip: process.platform === 'win32' }, async () => {
   const root = project();
   const elsewhere = mkdtempSync(join(tmpdir(), 'of-elsewhere-'));

@@ -70,6 +70,17 @@ test('voices: the prompt searches, then language and gender narrow; nothing foun
   assert.match(others.receipt.notes[0], /no voice matched "nobody"/);
 });
 
+test('voice-over forwards validated stability and similarity only on this synthesis request', async () => {
+  reply = () => [200, { audio_base64: Buffer.alloc(16000).toString('base64') }];
+  await elevenlabs.run('tts', { out: 'custom', text: 'Test', voice: 'v', stability: 0, similarity: 1 }, ctx());
+  assert.deepEqual(JSON.parse(seen.at(-1).body).voice_settings, { stability: 0, similarity_boost: 1 });
+  const before = seen.length;
+  for (const fields of [{ stability: -0.1 }, { similarity: 1.1 }, { stability: NaN }, { similarity: true }]) {
+    await assert.rejects(elevenlabs.run('tts', { out: 'invalid', text: 'Test', voice: 'v', ...fields }, ctx()), /between 0 and 1/);
+  }
+  assert.equal(seen.length, before);
+});
+
 test('sound effects and music: the length asked, within what the service takes', async () => {
   reply = () => [200, Buffer.alloc(32000)];
   const sfx = await elevenlabs.run('sfx', { out: 'ding', prompt: 'a glass chime', sec: 40 }, ctx());

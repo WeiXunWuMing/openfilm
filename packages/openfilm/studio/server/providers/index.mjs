@@ -26,6 +26,7 @@ import tavily from './tavily.mjs';
 import groq from './groq.mjs';
 import azure from './azure.mjs';
 import doubao from './doubao.mjs';
+import { elevenlabsVoicesRoute } from './elevenlabs-voices.mjs';
 
 /**
  * @typedef {import('./contract.mjs').Provider} Provider @typedef {import('./contract.mjs').Verb} Verb
@@ -137,6 +138,8 @@ async function state() {
  *   PUT    /api/providers/use       { verb, provider, model? }  who serves that kind of media (an id, or null: none),
  *                                       and with which of its models (its first when none is given)
  *   POST   /api/providers/:id/billing → {}, the provider's own page for its balance opened in the person's browser
+ *   GET    /api/providers/elevenlabs/voices  source, search, language, gender, cursor → paged voices and preview URLs
+ *   POST   /api/providers/elevenlabs/voices/add  { voiceId, publicOwnerId, name } → the account's voiceId
  *   POST   /api/providers/custom   { name, url, key?, auth?, note? }   one of the person's own services added
  *                                       (custom-services.mjs); the state has `custom: [{ id, name, url, auth, note,
  *                                       last4 }]`
@@ -147,6 +150,7 @@ async function state() {
  */
 export async function providersRoute(req, res, parts, { openBrowser }) {
   if (!parts.length && req.method === 'GET') return json(res, 200, await state());
+  if (parts[0] === 'elevenlabs' && parts[1] === 'voices') return elevenlabsVoicesRoute(req, res, parts.slice(2));
   if (parts[0] === 'custom' && parts.length <= 2) {
     const id = parts[1] ?? null;
     if (id === null ? req.method !== 'POST' : req.method !== 'PUT' && req.method !== 'DELETE') throw new HttpError(405, 'POST to add, PUT or DELETE one');

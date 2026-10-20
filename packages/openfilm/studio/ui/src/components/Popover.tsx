@@ -153,7 +153,8 @@ export function Popover({
       <div className={block ? 'flex min-w-0 flex-1' : 'inline-flex w-fit'} onMouseDown={keepFocus} onClick={() => onOpenChange(!open)}>
         {trigger}
       </div>
-      {typeof document !== 'undefined' && panel ? createPortal(panel, document.body) : null}
+      {/* A native modal makes body portals inert; its menus must stay in the same top layer. */}
+      {typeof document !== 'undefined' && panel ? createPortal(panel, ref.current?.closest('dialog[open]') ?? document.body) : null}
     </div>
   );
 }

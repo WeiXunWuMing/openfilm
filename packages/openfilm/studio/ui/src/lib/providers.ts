@@ -63,16 +63,62 @@ export const offered = (state: ProvidersState, verb: ProviderVerb) => state.prov
 /** The kinds of media the person chooses a provider for, in the order they are listed. */
 export const USE_VERBS: ProviderVerb[] = ['tts', 'music', 'sfx', 'asr', 'image', 'image-search', 'video', 'translate', 'web-search'];
 
-async function call<T = ProvidersState>(path: string, init?: { method: string; json?: unknown }): Promise<T> {
+async function call<T = ProvidersState>(path: string, init?: { method: string; json?: unknown; signal?: AbortSignal }): Promise<T> {
   const res = await fetch(`/api/providers${path}`, {
     method: init?.method ?? 'GET',
     cache: 'no-store',
+    signal: init?.signal,
     headers: init?.json === undefined ? undefined : { 'content-type': 'application/json' },
     body: init?.json === undefined ? undefined : JSON.stringify(init.json),
   });
   const body = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) throw new Error(body.error ?? `Studio answered ${res.status}`);
   return body as T;
+}
+
+export interface ElevenLabsVoice {
+  voiceId: string;
+  name: string;
+  language: string | null;
+  description: string | null;
+  previewUrl?: string | null;
+  gender?: string | null;
+  category?: string | null;
+  accent?: string | null;
+  publicOwnerId?: string | null;
+  freeUsersAllowed?: boolean | null;
+  age?: string | null;
+  useCase?: string | null;
+  style?: string | null;
+}
+
+export interface VoicePage {
+  voices: ElevenLabsVoice[];
+  nextCursor: string | null;
+  total: number | null;
+  tier: string;
+  unavailableReason: 'paid_required' | 'account_unavailable' | null;
+}
+export interface VoiceFilters { source: 'account' | 'library'; search: string; language: string; gender: string; accent: string }
+export interface VoiceAccent { accent: string; language: string; code: string; name: string }
+export interface ElevenLabsVoiceSettings { stability: number; similarity: number }
+export const DEFAULT_VOICE_SETTINGS: ElevenLabsVoiceSettings = { stability: 0.5, similarity: 0.75 };
+
+export function loadElevenLabsAccents(language: string, signal: AbortSignal, refresh = false): Promise<{ accents: VoiceAccent[] }> {
+  return call(`/elevenlabs/voices/accents?${new URLSearchParams({ ...(language ? { language } : {}), ...(refresh ? { refresh: '1' } : {}) })}`, { method: 'GET', signal: AbortSignal.any([signal, AbortSignal.timeout(25_000)]) });
+}
+
+export function loadElevenLabsVoices(filters: VoiceFilters, cursor: string | null, signal: AbortSignal, refresh = false): Promise<VoicePage> {
+  const query = new URLSearchParams({ ...filters, ...(cursor ? { cursor } : {}), ...(refresh ? { refresh: '1' } : {}) });
+  return call(`/elevenlabs/voices?${query}`, { method: 'GET', signal: AbortSignal.any([signal, AbortSignal.timeout(25_000)]) });
+}
+
+export function addSharedElevenLabsVoice(voice: ElevenLabsVoice, signal?: AbortSignal): Promise<{ voiceId: string }> {
+  return call('/elevenlabs/voices/add', { method: 'POST', json: { voiceId: voice.voiceId, publicOwnerId: voice.publicOwnerId, name: voice.name }, signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(25_000)]) });
+}
+
+export function generateElevenLabsPreview(voiceId: string, text: string, settings: ElevenLabsVoiceSettings, signal: AbortSignal): Promise<{ audioBase64: string }> {
+  return call('/elevenlabs/voices/preview', { method: 'POST', json: { voiceId, text, ...settings }, signal: AbortSignal.any([signal, AbortSignal.timeout(25_000)]) });
 }
 
 export interface ProvidersHook {

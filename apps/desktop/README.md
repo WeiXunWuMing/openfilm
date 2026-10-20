@@ -10,6 +10,8 @@ npm test
 npm run typecheck
 ```
 
+`node bench/voice-options.test.mjs` builds and checks voice options in Electron with fake API responses. It needs ffmpeg and never spends credits.
+
 Run from source, the app is its own "OpenFilm Dev": its own name, data folder, Studio home and port, so it never
 shares anything with an installed OpenFilm. Its renamed copy of Electron lives in `.dev/` (git-ignored).
 
