@@ -1,5 +1,31 @@
 # @openfilm/desktop
 
+## 0.2.3
+
+### Patch Changes
+
+- [#125](https://github.com/openfilm/openfilm/pull/125) [`613350d`](https://github.com/openfilm/openfilm/commit/613350d3060224afe54afc18f6294ec6ce2bea78) Thanks [@PazChen](https://github.com/PazChen)! - Agents use your system's proxy. When a proxy app turns on the system proxy (on Windows or macOS) and you have not set HTTPS_PROXY yourself, OpenFilm gives the agents that proxy as HTTPS_PROXY, HTTP_PROXY and NO_PROXY. Codex no longer waits through five WebSocket timeouts before your first reply.
+
+- [#114](https://github.com/openfilm/openfilm/pull/114) [`f90e8ab`](https://github.com/openfilm/openfilm/commit/f90e8abb389c096a6a318341c01ea5643596ebf8) Thanks [@taavie-z](https://github.com/taavie-z)! - Choose cover images when adding skills, and replace or remove covers for your own skills from their details.
+
+- [#121](https://github.com/openfilm/openfilm/pull/121) [`d552d8c`](https://github.com/openfilm/openfilm/commit/d552d8c807d70180fdd908b8c6c155a3ce083861) Thanks [@PazChen](https://github.com/PazChen)! - Settings › Agents: Codex's Install opens chatgpt.com/download, where its app and command line are.
+
+- [#115](https://github.com/openfilm/openfilm/pull/115) [`1baa02b`](https://github.com/openfilm/openfilm/commit/1baa02b16969953b7f30f444ecf577be1c011b87) Thanks [@PazChen](https://github.com/PazChen)! - Desktop on Windows: Codex starts for people who have the Codex app. OpenFilm used the codex.exe inside the app's Microsoft Store folder, which Windows lets no other program start ("Access is denied"); it now uses the copy the Codex app itself starts, in %LOCALAPPDATA%\OpenAI\Codex\bin, and never a program inside a Store app's folder.
+
+- [#128](https://github.com/openfilm/openfilm/pull/128) [`25a84b7`](https://github.com/openfilm/openfilm/commit/25a84b72328643d925e20fd9cd6cf96053153553) Thanks [@PazChen](https://github.com/PazChen)! - Desktop: the menu bar speaks Studio's language, in each of its five, every item in it, and changes when Studio's does. So do the dialogs of Check for Updates. Before Studio is up, the menu takes the system's language.
+
+- [#85](https://github.com/openfilm/openfilm/pull/85) [`d6a3a86`](https://github.com/openfilm/openfilm/commit/d6a3a86ba9903a60e3f83f9dd74bd9dc90a54cfb) Thanks [@xyd945](https://github.com/xyd945)! - Keep live film, file, history and export updates connected after a project is renamed, and send the desktop agent to its new folder. Wait for active agent work and running or queued exports to finish before renaming a project.
+
+- [#113](https://github.com/openfilm/openfilm/pull/113) [`1da84e3`](https://github.com/openfilm/openfilm/commit/1da84e34e6fa50653449630379958d3585f6ab45) Thanks [@taavie-z](https://github.com/taavie-z)! - Refresh the open skills gallery after adding a skill, without reloading the page.
+
+- [#124](https://github.com/openfilm/openfilm/pull/124) [`a7f0a1e`](https://github.com/openfilm/openfilm/commit/a7f0a1ef461f346ae73e53ca9eb7932f80bb2c39) Thanks [@PazChen](https://github.com/PazChen)! - On Windows, Open in Settings → General → Storage shows the projects folder again, and the button no longer looks greyed out. In the app, the top bar's "…" menu is now one Export button with an export icon; "Use this frame as the cover" and "Reveal in Finder" (Explorer on Windows) are in the project tab's right-click menu. A tab's close button shows a background when pointed at, without a tooltip.
+  The timeline's preview axis starts off: the picture stays at the playhead until you turn it on.
+
+- [#117](https://github.com/openfilm/openfilm/pull/117) [`73b8eb1`](https://github.com/openfilm/openfilm/commit/73b8eb1fdcfe0132fb6326cfac3fc5ffa46021ae) Thanks [@WEBGRS](https://github.com/WEBGRS)! - Desktop: on Windows, Install and Sign in open their PowerShell window again; before, the window never appeared and the installer or sign-in never ran.
+
+- Updated dependencies [[`f90e8ab`](https://github.com/openfilm/openfilm/commit/f90e8abb389c096a6a318341c01ea5643596ebf8), [`e199314`](https://github.com/openfilm/openfilm/commit/e1993148e81402f78dcd72687c188b8fee582d18), [`4503390`](https://github.com/openfilm/openfilm/commit/4503390dcb31c421948a2a517cb040c9e6cf043d), [`d6a3a86`](https://github.com/openfilm/openfilm/commit/d6a3a86ba9903a60e3f83f9dd74bd9dc90a54cfb), [`1da84e3`](https://github.com/openfilm/openfilm/commit/1da84e34e6fa50653449630379958d3585f6ab45), [`ef79883`](https://github.com/openfilm/openfilm/commit/ef79883ff7032258534ea24726a06f12ff28d15b), [`a7f0a1e`](https://github.com/openfilm/openfilm/commit/a7f0a1ef461f346ae73e53ca9eb7932f80bb2c39)]:
+  - openfilm@0.2.3
+
 ## 0.2.2
 
 ### Patch Changes

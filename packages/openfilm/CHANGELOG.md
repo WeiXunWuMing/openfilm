@@ -1,5 +1,24 @@
 # openfilm
 
+## 0.2.3
+
+### Patch Changes
+
+- [#114](https://github.com/openfilm/openfilm/pull/114) [`f90e8ab`](https://github.com/openfilm/openfilm/commit/f90e8abb389c096a6a318341c01ea5643596ebf8) Thanks [@taavie-z](https://github.com/taavie-z)! - Choose cover images when adding skills, and replace or remove covers for your own skills from their details.
+
+- [#120](https://github.com/openfilm/openfilm/pull/120) [`e199314`](https://github.com/openfilm/openfilm/commit/e1993148e81402f78dcd72687c188b8fee582d18) Thanks [@PazChen](https://github.com/PazChen)! - Settings › Agents: Claude Code waiting in the Claude app shows only how to get it (open the app's Code tab once), without an Install button that led elsewhere.
+
+- [#127](https://github.com/openfilm/openfilm/pull/127) [`4503390`](https://github.com/openfilm/openfilm/commit/4503390dcb31c421948a2a517cb040c9e6cf043d) Thanks [@PazChen](https://github.com/PazChen)! - Studio: scrolling in the export dialog no longer makes the window flicker on macOS. Nothing behind the dialog is blurred, and a scroll that reaches the end of a list stops there instead of moving the page behind.
+
+- [#85](https://github.com/openfilm/openfilm/pull/85) [`d6a3a86`](https://github.com/openfilm/openfilm/commit/d6a3a86ba9903a60e3f83f9dd74bd9dc90a54cfb) Thanks [@xyd945](https://github.com/xyd945)! - Keep live film, file, history and export updates connected after a project is renamed, and send the desktop agent to its new folder. Wait for active agent work and running or queued exports to finish before renaming a project.
+
+- [#113](https://github.com/openfilm/openfilm/pull/113) [`1da84e3`](https://github.com/openfilm/openfilm/commit/1da84e34e6fa50653449630379958d3585f6ab45) Thanks [@taavie-z](https://github.com/taavie-z)! - Refresh the open skills gallery after adding a skill, without reloading the page.
+
+- [#122](https://github.com/openfilm/openfilm/pull/122) [`ef79883`](https://github.com/openfilm/openfilm/commit/ef79883ff7032258534ea24726a06f12ff28d15b) Thanks [@PazChen](https://github.com/PazChen)! - Settings: "Draw pages at the viewer's size" and "Render what plays late" move from General to a new Advanced section under Help. Both stay on, as they were.
+
+- [#124](https://github.com/openfilm/openfilm/pull/124) [`a7f0a1e`](https://github.com/openfilm/openfilm/commit/a7f0a1ef461f346ae73e53ca9eb7932f80bb2c39) Thanks [@PazChen](https://github.com/PazChen)! - On Windows, Open in Settings → General → Storage shows the projects folder again, and the button no longer looks greyed out. In the app, the top bar's "…" menu is now one Export button with an export icon; "Use this frame as the cover" and "Reveal in Finder" (Explorer on Windows) are in the project tab's right-click menu. A tab's close button shows a background when pointed at, without a tooltip.
+  The timeline's preview axis starts off: the picture stays at the playhead until you turn it on.
+
 ## 0.2.2
 
 ### Patch Changes
