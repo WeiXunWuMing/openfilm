@@ -938,7 +938,10 @@ export function MediaPool({
           if (boxed.current) { boxed.current = false; return; }
           if (!(e.target as Element).closest('[data-media-path], [data-media-folder], [data-media-new-folder], button')) { setPicked([]); showFile(null); }
         }}
-        onContextMenu={(e) => { if (e.target === e.currentTarget) { e.preventDefault(); openMenuAt(e, blankMenu); } }}
+        onContextMenu={(e) => {
+          if ((e.target as Element).closest('[data-media-path], [data-media-folder], [data-media-new-folder], [data-media-upload], button, input, textarea')) return;
+          e.preventDefault(); openMenuAt(e, blankMenu);
+        }}
       >
         {marquee ? (
           <div className="pointer-events-none absolute z-20 rounded-[2px] border border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)]"
@@ -957,8 +960,7 @@ export function MediaPool({
             </div>
           )
         ) : (
-          <div className={rows ? '@container flex flex-col gap-px' : 'grid gap-x-2 gap-y-2.5'} style={rows ? undefined : { gridTemplateColumns: 'repeat(auto-fill, minmax(104px, 1fr))' }}
-            onContextMenu={(e) => { if (e.target === e.currentTarget) { e.preventDefault(); openMenuAt(e, blankMenu); } }}>
+          <div className={rows ? '@container flex flex-col gap-px' : 'grid gap-x-2 gap-y-2.5'} style={rows ? undefined : { gridTemplateColumns: 'repeat(auto-fill, minmax(104px, 1fr))' }}>
             {rows ? (
               <div className="flex h-6 shrink-0 select-none items-center gap-2 px-1.5 text-[11px] text-[var(--text-faint)]">
                 <span className="w-[46px] shrink-0" />

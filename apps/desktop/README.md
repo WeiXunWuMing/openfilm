@@ -10,6 +10,8 @@ npm test
 npm run typecheck
 ```
 
+`node bench/media-menu.test.mjs` builds and checks empty and populated media-pane menus in an isolated Electron app, with file pickers cancelled.
+
 Run from source, the app is its own "OpenFilm Dev": its own name, data folder, Studio home and port, so it never
 shares anything with an installed OpenFilm. Its renamed copy of Electron lives in `.dev/` (git-ignored).
 
