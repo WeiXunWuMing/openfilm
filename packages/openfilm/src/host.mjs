@@ -287,13 +287,12 @@ async function rendererOf(browser) {
 }
 
 /**
- * Windows: headless Chromium picks no ANGLE backend by itself and draws WebGL with SwiftShader, on the CPU. Vulkan
- * reaches the GPU (on a laptop with two, the discrete one: d3d11 and gl take the integrated one). A virtual machine, a
- * CI runner or a computer without a Vulkan driver has none, so the first browser reads its renderer once: when Vulkan
- * did not start, or is software too, it and every later browser take Chromium's default.
+ * Windows: Vulkan can report a real GPU while paused HEVC frames never present, making every seek wait five seconds.
+ * Prefer D3D11, then Vulkan if it cannot start or draws in software, then Chromium's default. Read the renderer once
+ * per candidate and reuse the selected backend for every later browser.
  * @param {(browser: import('playwright-core').Browser) => Promise<string>} [renderer]
  */
-export function vulkanFirst(renderer = rendererOf) {
+export function windowsGpuFirst(renderer = rendererOf) {
   /** @type {Promise<string[]> | null} what every browser after the first is opened with */
   let chosen = null;
   /** @param {(angle: string[]) => Promise<import('playwright-core').Browser>} open */
@@ -302,19 +301,22 @@ export function vulkanFirst(renderer = rendererOf) {
     /** @type {(angle: string[]) => void} */
     let choose = () => {};
     chosen = new Promise((r) => { choose = r; });
-    const vulkan = ['--use-angle=vulkan'];
-    const browser = await open(vulkan).catch(() => null);
-    const gpu = browser ? await inTime(renderer(browser), 30_000, 'no renderer').catch(() => 'none') : 'none';
-    if (browser && gpu !== 'none' && !SOFTWARE_GL.test(gpu)) {
-      choose(vulkan);
-      return browser;
+    for (const angle of [['--use-angle=d3d11'], ['--use-angle=vulkan']]) {
+      const browser = await open(angle).catch(() => null);
+      const gpu = browser ? await inTime(renderer(browser), 30_000, 'no renderer').catch(() => 'none') : 'none';
+      if (browser && gpu !== 'none' && !SOFTWARE_GL.test(gpu)) {
+        choose(angle);
+        return browser;
+      }
+      await browser?.close().catch(() => {});
     }
-    await browser?.close().catch(() => {});
     choose([]);
     return open([]);
   };
 }
-const onWindows = vulkanFirst();
+/** @deprecated Use windowsGpuFirst. */
+export const vulkanFirst = windowsGpuFirst;
+const onWindows = windowsGpuFirst();
 
 /** Every browser launch() opened and that is still open. */
 const LIVE = new Set();

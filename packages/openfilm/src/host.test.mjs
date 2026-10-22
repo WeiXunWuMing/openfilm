@@ -7,7 +7,7 @@ import { get } from 'node:http';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { serve, vulkanFirst } from './host.mjs';
+import { serve, vulkanFirst, windowsGpuFirst } from './host.mjs';
 import { locate } from './shared.mjs';
 
 test('cancelled media requests close their files so the project can be renamed', { timeout: 10000 }, async (t) => {
@@ -111,13 +111,13 @@ test('look and render serve the film\'s project, never the folders around it', (
   }
 });
 
-test('Windows: Vulkan when its renderer is a GPU, read once; otherwise the default, for every later browser too', async () => {
-  /** A launcher that records what each browser was opened with; `fails` makes a Vulkan launch throw. */
+test('Windows: prefer D3D11, then Vulkan, then the default; cache the choice across concurrent launches', async () => {
+  /** A launcher that records what each browser was opened with; `fails` makes explicit backends throw. */
   const launcher = (fails = false) => {
     const opened = /** @type {string[][]} */ ([]), closed = /** @type {string[][]} */ ([]);
     const open = async (/** @type {string[]} */ angle) => {
       opened.push(angle);
-      if (fails && angle.length) throw new Error('no Vulkan driver');
+      if (fails && angle.length) throw new Error('no graphics driver');
       return /** @type {any} */ ({ angle, close: async () => { closed.push(angle); } });
     };
     return { open, opened, closed };
@@ -126,14 +126,23 @@ test('Windows: Vulkan when its renderer is a GPU, read once; otherwise the defau
     let count = 0;
     return { renderer: async () => { count++; return said(); }, get count() { return count; } };
   };
-  const vulkan = ['--use-angle=vulkan'];
+  const d3d11 = ['--use-angle=d3d11'], vulkan = ['--use-angle=vulkan'];
 
-  const gpu = reads(async () => 'ANGLE (NVIDIA, Vulkan 1.4.329 (NVIDIA GeForce RTX 5070 Laptop GPU (0x00002D58)), NVIDIA)');
-  let l = launcher(), pick = vulkanFirst(gpu.renderer);
+  const gpu = reads(async () => 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)');
+  let l = launcher(), pick = windowsGpuFirst(gpu.renderer);
   const browsers = await Promise.all([pick(l.open), pick(l.open), pick(l.open)]);
-  assert.deepEqual(browsers.map((b) => b.angle), [vulkan, vulkan, vulkan]);
+  assert.deepEqual(browsers.map((b) => b.angle), [d3d11, d3d11, d3d11]);
   assert.equal(gpu.count, 1);
   assert.deepEqual(l.closed, []);
+
+  let attempt = 0;
+  const fallback = reads(async () => ++attempt === 1 ? 'none' : 'ANGLE (NVIDIA, Vulkan, NVIDIA)');
+  l = launcher(); pick = windowsGpuFirst(fallback.renderer);
+  const [fallbackFirst, fallbackSecond] = await Promise.all([pick(l.open), pick(l.open)]);
+  assert.deepEqual([fallbackFirst.angle, fallbackSecond.angle], [vulkan, vulkan]);
+  assert.deepEqual(l.opened, [d3d11, vulkan, vulkan]);
+  assert.deepEqual(l.closed, [d3d11]);
+  assert.equal(fallback.count, 2);
 
   /* WARP is Microsoft's own software rasteriser: a machine with no GPU driver, or a remote session, reads it. */
   for (const said of [
@@ -143,18 +152,18 @@ test('Windows: Vulkan when its renderer is a GPU, read once; otherwise the defau
     async () => { throw new Error('page crashed'); },
   ]) {
     const software = reads(said);
-    l = launcher(); pick = vulkanFirst(software.renderer);
+    l = launcher(); pick = windowsGpuFirst(software.renderer);
     const [first, second] = await Promise.all([pick(l.open), pick(l.open)]);
     assert.deepEqual([first.angle, second.angle], [[], []]);
-    assert.deepEqual(l.opened, [vulkan, [], []]);
-    assert.deepEqual(l.closed, [vulkan]);
-    assert.equal(software.count, 1);
+    assert.deepEqual(l.opened, [d3d11, vulkan, [], []]);
+    assert.deepEqual(l.closed, [d3d11, vulkan]);
+    assert.equal(software.count, 2);
   }
 
   const never = reads(async () => 'unused');
   l = launcher(true); pick = vulkanFirst(never.renderer);
   assert.deepEqual((await pick(l.open)).angle, []);
   assert.deepEqual((await pick(l.open)).angle, []);
-  assert.deepEqual(l.opened, [vulkan, [], []]);
+  assert.deepEqual(l.opened, [d3d11, vulkan, [], []]);
   assert.equal(never.count, 0);
 });
