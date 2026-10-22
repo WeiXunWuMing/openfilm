@@ -76,22 +76,30 @@ export function fcpxmlDocument(timeline, { cues = [] } = {}) {
     const pad = lane === 0 ? '            ' : '              ';
     const attrs = [
       ...(kind === 'audio' ? [`ref="${clip.fileId}"`] : ['format="sequence-format"']), `name="${attribute(clip.name)}"`, `lane="${lane}"`,
-      `offset="${time(offset)}"`, `start="${time(clip.in)}"`, `duration="${time(clip.end - clip.start)}"`,
+      `offset="${time(offset)}"`, `start="${time(kind === 'audio' && clip.speed ? 0 : clip.in)}"`, `duration="${time(clip.end - clip.start)}"`,
       `enabled="${enabled && clip.enabled ? 1 : 0}"`,
     ];
     if (audioRole) attrs.push(`role="${attribute(audioRole)}"`);
     const lines = [`${pad}<${tag} ${attrs.join(' ')}>`];
+    const retime = [
+      `${pad}  <timeMap preservesPitch="1">`,
+      `${pad}    <timept time="0s" value="${time(clip.in)}" interp="linear"/>`,
+      `${pad}    <timept time="${time(clip.end - clip.start)}" value="${time(clip.out)}" interp="linear"/>`,
+      `${pad}  </timeMap>`,
+    ];
+    if (kind === 'audio' && clip.speed) lines.push(...retime);
     if (kind === 'video') {
-      lines.push(`${pad}  <video ref="${clip.fileId}" name="${attribute(clip.name)}" offset="${time(clip.in)}" start="${time(clip.in)}" duration="${time(clip.end - clip.start)}">`);
+      lines.push(`${pad}  <video ref="${clip.fileId}" name="${attribute(clip.name)}" offset="${time(clip.in)}" start="${time(clip.speed ? 0 : clip.in)}" duration="${time(clip.end - clip.start)}">`);
+      if (clip.speed) lines.push(...retime.map((line) => `  ${line}`));
       // Disable automatic fitting: the planner's scale is relative to the source's own pixels.
       lines.push(`${pad}  <adjust-conform type="none"/>`);
       if (clip.motion) {
-        const { scale, center } = clip.motion;
+        const { scale, center, rotation } = clip.motion;
         const position = `${decimal(center.h * width / height * 100)} ${decimal(-center.v * 100)}`;
-        lines.push(`${pad}  <adjust-transform position="${position}" scale="${decimal(scale / 100)} ${decimal(scale / 100)}"/>`);
+        lines.push(`${pad}  <adjust-transform position="${position}" scale="${decimal(scale / 100)} ${decimal(scale / 100)}"${rotation ? ` rotation="${decimal(-rotation)}"` : ''}/>`);
       }
-      // FCP keeps footage audio connected when it is nested inside the video component.
-      lines.push(...audio, `${pad}  </video>`);
+      // A time-mapped video would also retime anchored audio: keep independently retimed sound beside it.
+      lines.push(...(clip.speed ? [] : audio), `${pad}  </video>`, ...(clip.speed ? audio : []));
     } else if (clip.levels?.length) {
       lines.push(`${pad}  <adjust-volume>`, `${pad}    <param name="amount">`, `${pad}      <keyframeAnimation>`);
       for (const key of clip.levels) {

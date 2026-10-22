@@ -28,7 +28,7 @@ export type ExportRequest = { range?: [number, number]; label?: string; name?: s
   /* for an editing program: an XML and media folder; `media: 'link'` points at the sources where they are instead of cloning them */
   | { kind: 'nle'; format?: 'xml' | 'fcpxml' | 'jianying' | 'capcut'; fps: number; audio: 'clips' | 'stems'; media?: 'copy' | 'link'; subtitles: boolean;
       /* how the pages, rendered with their alpha, are written */
-      alpha?: NleAlpha }
+      alpha?: NleAlpha; visuals?: 'effects' | 'source' }
   /* the project itself: its work, and the parts of its .film asked; a zip of its folder, or the folder */
   | { kind: 'project'; parts: ProjectPart[]; as: 'zip' | 'folder' }
 );

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import React from 'react';
 import { createPortal } from 'react-dom';
+import { nlePictureEffects, type NlePictureLook } from '../../../../../src/nle-picture.mjs';
 
 import { useLanguage, useT } from '@/i18n';
 import { studioHost } from '@/lib/host';
@@ -231,6 +232,8 @@ export interface ExportCenterProps {
   playheadMs?: number;
   /** The timeline's motion-graphic blocks: a transparent export can be just one of them. */
   mgBlocks?: readonly { clipId: string; label: string; startMs: number; durMs: number }[];
+  /** Original pictures and their measured CSS; pages are always rendered and need no choice. */
+  nlePictures?: readonly (NlePictureLook & { id: string })[];
   /** From a block's "Export this clip": opens on transparent assets with that block chosen. */
   focusClipId?: string;
   /** The exports were queued (the tray shows them). */
@@ -271,6 +274,7 @@ export function ExportCenter(props: ExportCenterProps) {
   const [exportName, setExportName] = React.useState<string>('');
   /** Whether that name was typed over: only then is it sent, so a dialog left alone exports as it always did. */
   const [nameTyped, setNameTyped] = React.useState(false);
+  const [nleVisuals, setNleVisuals] = React.useState<'effects' | 'source'>('effects');
 
   React.useEffect(() => {
     if (!open) return;
@@ -285,6 +289,7 @@ export function ExportCenter(props: ExportCenterProps) {
     /* a name is this export's, not a setting: each visit starts from the project's own */
     setExportName(props.title);
     setNameTyped(false);
+    setNleVisuals('effects');
     setRange((r) => ({ ...r, on: false }));
     void listExports(props.projectId).then((r) => { setCan(r.can); setDraftApps({ jianying: Boolean(r.drafts?.jianying), capcut: Boolean(r.drafts?.capcut) }); setDefaultFolder(r.folder); setCaptionCount(r.subtitles ?? 0); setProjectSizes(r.project ?? null); }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -302,6 +307,12 @@ export function ExportCenter(props: ExportCenterProps) {
   }, [open, onClose, working]);
 
   const stage = props.stage;
+  const nleAffected = React.useMemo(() => (props.nlePictures ?? []).flatMap((picture) => {
+    const effects = nlePictureEffects(picture, stage);
+    return effects.length ? [{ id: picture.id, effects }] : [];
+  }), [props.nlePictures, stage]);
+  const nleNeedsChoice = props.nlePictures === undefined || nleAffected.length > 0;
+  const nleReasons = [...new Set(nleAffected.flatMap((p) => p.effects))];
   const totalMs = props.durationMs;
   const film = props.film ?? null;
   const soundKinds = React.useMemo(
@@ -434,6 +445,7 @@ export function ExportCenter(props: ExportCenterProps) {
         return [{
           kind: 'nle', format: nleApp === 'draft' ? draftApp : NLE_APPS[nleApp].format, fps: s.nle.fps === 'source' ? (nleSourceFps ?? projectFps) : s.nle.fps, audio: s.nle.audio, media: 'copy', alpha: nleAlpha,
           subtitles: s.nle.subtitles, label: nleApp === 'draft' ? tApp('exportCenter.nleDraftTitle') : `${NLE_APPS[nleApp].name} XML`,
+          visuals: nleNeedsChoice ? nleVisuals : 'effects',
         }];
       case 'subtitles':
         return [{ kind: 'subtitles', format: s.subtitles.format, label: s.subtitles.format === 'txt' ? t('exportCenter.transcript') : s.subtitles.format.toUpperCase(), ...ranged }];
@@ -454,7 +466,7 @@ export function ExportCenter(props: ExportCenterProps) {
         }];
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dest, s, can, presets, nleApp, nleAlpha, draftApp, rangeSec?.[0], rangeSec?.[1], props.frame, blocks, nleSourceFps, captions, projectParts]);
+  }, [dest, s, can, presets, nleApp, nleAlpha, draftApp, rangeSec?.[0], rangeSec?.[1], props.frame, blocks, nleSourceFps, captions, projectParts, nleNeedsChoice, nleVisuals]);
 
   /* a range, not a size: what is in the picture decides a video's or a GIF's size (export-spec.ts); sound is exact */
   const estBytes = React.useMemo(() => requests.reduce<[number, number]>(([low, high], r) => {
@@ -892,6 +904,19 @@ export function ExportCenter(props: ExportCenterProps) {
                           );
                         })}
                       </div>
+                    </Field>
+                  )}
+                  {nleNeedsChoice && (
+                    <Field label={t('exportCenter.nleVisuals')}>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(['effects', 'source'] as const).map((mode) => (
+                          <OptionCard key={mode} on={nleVisuals === mode} title={t(`exportCenter.nleVisuals${mode === 'effects' ? 'Effects' : 'Source'}`)}
+                            desc={t(`exportCenter.nleVisuals${mode === 'effects' ? 'Effects' : 'Source'}Hint`)} onClick={() => setNleVisuals(mode)} />
+                        ))}
+                      </div>
+                      <Hint>{nleAffected.length
+                        ? t('exportCenter.nleVisualsAffected').replace('{n}', String(nleAffected.length)).replace('{effects}', nleReasons.map((r) => t(`exportCenter.nleEffect.${r}`)).join(language === 'zh-CN' ? '、' : ', '))
+                        : t('exportCenter.nleVisualsUnknown')}</Hint>
                     </Field>
                   )}
                   <Field label={t('exportCenter.fps')}>

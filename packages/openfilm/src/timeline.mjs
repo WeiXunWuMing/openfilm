@@ -1005,9 +1005,23 @@ window.__filmSpans = () => clips.map((c) => ({
  */
 function lookOf(c) {
   const css = getComputedStyle(c.el);
+  let parentEffect = false, animated = c.el.getAnimations().length > 0 || css.animationName !== 'none';
+  for (let el = c.el.parentElement; el; el = el.parentElement) {
+    const parent = getComputedStyle(el);
+    parentEffect ||= parent.filter !== 'none' || parent.mixBlendMode !== 'normal' || Number(parent.opacity) !== 1
+      || parent.clipPath !== 'none' || parent.maskImage !== 'none' || parent.transform !== 'none';
+    animated ||= el.getAnimations().length > 0 || parent.animationName !== 'none';
+  }
   return {
     fit: css.objectFit, position: css.objectPosition, radius: css.borderTopLeftRadius, opacity: c.faded && c.base != null ? String(c.base) : css.opacity,
     blend: css.mixBlendMode, clip: css.clipPath, filter: css.filter,
+    animated,
+    extra: parentEffect || css.boxShadow !== 'none' || css.maskImage !== 'none' || css.backdropFilter !== 'none'
+      || css.backgroundImage !== 'none' || css.backgroundColor !== 'rgba(0, 0, 0, 0)'
+      || (css.outlineStyle !== 'none' && parseFloat(css.outlineWidth) > 0)
+      || [css.borderTopWidth, css.borderRightWidth, css.borderBottomWidth, css.borderLeftWidth,
+        css.paddingTop, css.paddingRight, css.paddingBottom, css.paddingLeft,
+        css.borderTopRightRadius, css.borderBottomLeftRadius, css.borderBottomRightRadius].some((v) => parseFloat(v) > 0),
   };
 }
 /* for `look`: the person's tweaks inside pages, whether each still finds its element in the frames drawn, and fades */

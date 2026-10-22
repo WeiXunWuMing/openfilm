@@ -150,9 +150,9 @@ export function jianyingDraft(timeline, opts) {
     materialOf.set(key, id);
     return id;
   };
-  const speed = () => {
+  const speed = (value = 1) => {
     const id = hex();
-    materials.speeds.push({ curve_speed: null, id, mode: 0, speed: 1, type: 'speed' });
+    materials.speeds.push({ curve_speed: null, id, mode: 0, speed: value, type: 'speed' });
     return id;
   };
 
@@ -190,7 +190,8 @@ export function jianyingDraft(timeline, opts) {
           material_id: material(file, 'video'), target_timerange: span(c.start, c.end),
           source_timerange: file.video?.still ? { start: 0, duration: us(c.end) - us(c.start) } : span(c.in, c.out),
           visible: t.enabled && c.enabled, volume: level, last_nonzero_volume: level || 1,
-          extra_material_refs: [speed()], clip: clipSettings(scale, x, y), uniform_scale: { on: true, value: 1 },
+          speed: c.speed ?? 1, extra_material_refs: [speed(c.speed)],
+          clip: { ...clipSettings(scale, x, y), rotation: c.motion?.rotation ?? 0 }, uniform_scale: { on: true, value: 1 },
           hdr_settings: { intensity: 1, mode: 1, nits: 1000 }, render_index: index,
         });
       }),
@@ -207,7 +208,7 @@ export function jianyingDraft(timeline, opts) {
       segments: clips.map((c) => {
         const file = /** @type {NleFile} */ (files.get(c.fileId));
         const level = c.levels ? Math.max(...c.levels.map((k) => k.value)) : c.gain ?? 1;
-        const refs = [speed()];
+        const refs = [speed(c.speed)];
         /* a fade: the plan's level keyframes (silent at an end) as 剪映's fade in and out */
         if (c.levels && c.levels.length > 1) {
           const keys = c.levels;
@@ -223,6 +224,7 @@ export function jianyingDraft(timeline, opts) {
         return segment({
           material_id: material(file, 'audio'), target_timerange: span(c.start, c.end), source_timerange: span(c.in, c.out),
           volume: c.enabled ? round6(level) : 0, last_nonzero_volume: round6(level) || 1,
+          speed: c.speed ?? 1,
           extra_material_refs: refs, clip: null, hdr_settings: null, render_index: index,
         });
       }),

@@ -10,7 +10,7 @@
 import { declarations } from '../../../../src/film-doc.mjs';
 
 /** The look the film's CSS gives a picture, as the player measured it (src/timeline.mjs lookOf). */
-export type ClipLook = { fit: string; position: string; radius: string; opacity: string; blend: string; clip: string; filter: string };
+export type ClipLook = { fit: string; position: string; radius: string; opacity: string; blend: string; clip: string; filter: string; extra?: boolean; animated?: boolean };
 
 /** `style` with each of `set` written (a value) or taken out (null), in place where it was, new ones at the end. */
 export function withDeclarations(style: string, set: Record<string, string | null>): string {
