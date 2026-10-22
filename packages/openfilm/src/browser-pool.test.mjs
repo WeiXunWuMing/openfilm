@@ -70,6 +70,9 @@ test('a render is drawn again in new browsers only when its browser failed it', 
   assert.ok(browserFailed(new Error('the browser drawing the page closed (it crashed, or the system ended it)')));
   assert.ok(browserFailed(new Error('frame(1.2) did not finish within 60 s')));
   assert.ok(browserFailed(new Error('the picture did not come within 30 s')));
+  assert.ok(browserFailed(new Error('page.goto: net::ERR_NO_BUFFER_SPACE at http://127.0.0.1:59165/film.html')));
+  assert.ok(browserFailed(new Error('window.film with a frame() function did not appear within 10 s; failed to load: net::ERR_NO_BUFFER_SPACE __film/overrides.mjs')));
+  assert.ok(!browserFailed(new Error('window.film with a frame() function did not appear within 10 s; failed to load: net::ERR_FILE_NOT_FOUND lib.js')), 'a missing file would be missing again');
   assert.ok(!browserFailed(new Error('frame(1.2) did not finish within 60 s (the page is still running code: a loop that never ends?)')), 'a loop in the page would loop again');
   assert.ok(!browserFailed(new Error('frame(1.2) threw: x is not defined')));
   assert.ok(!browserFailed(new Error('ffmpeg: Unknown encoder')));

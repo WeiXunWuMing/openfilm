@@ -222,6 +222,23 @@ test('a renderer that dies fails its export with the reason, and exports go on',
   assert.equal((await ended(exports, again)).status, 'done');
 });
 
+test('a video whose browser is ended partway, as a crash would end it, is drawn again and done', { ...ffmpeg, skip: ffmpeg.skip || (process.platform === 'win32' && 'no pgrep') }, async () => {
+  const exports = createExports();
+  const job = exports.start(project('Browser crash'), { kind: 'video' });
+  await until(exports, job.id, (j) => j.status === 'running' && j.out);
+  /** @type {number[]} */
+  let browsers = [];
+  for (let i = 0; i < 400 && !browsers.length; i++) {
+    const [worker] = spawnSync('pgrep', ['-P', String(process.pid), '-f', 'render-worker'], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean).map(Number);
+    if (worker) browsers = spawnSync('pgrep', ['-P', String(worker), '-f', 'chrom'], { encoding: 'utf8' }).stdout.trim().split('\n').filter(Boolean).map(Number);
+    if (!browsers.length) await new Promise((r) => setTimeout(r, 25));
+  }
+  assert.ok(browsers.length, 'the film draws in a browser of the render process');
+  for (const pid of browsers) process.kill(pid, 'SIGKILL');
+  const done = await ended(exports, job);
+  assert.equal(done.status, 'done', done.error);
+});
+
 test('a cancelled export stops and leaves no file, and a bad ask is refused before it is queued', ffmpeg, async () => {
   /** @type {any[]} */
   const seen = [];

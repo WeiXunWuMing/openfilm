@@ -74,8 +74,12 @@ export class BrowserPool {
   }
 }
 
-/** What a browser that crashed, or a tab that stopped answering, says: drawn again in new browsers, it may work. */
-const BROWSER_FAILED = /browser drawing the page closed|target (page, context or browser has been )?closed|target crashed|page crashed|browser has been closed|browser (has )?disconnected|did not finish within|did not come within/i;
+/**
+ * What a browser that crashed, or a tab that stopped answering, says: drawn again in new browsers, it may work. Also a
+ * page or a file the browser could not load from Studio for want of the system's network buffers (Windows: a moment's
+ * shortage, not the page's fault).
+ */
+const BROWSER_FAILED = /browser drawing the page closed|target (page, context or browser has been )?closed|target crashed|page crashed|browser has been closed|browser (has )?disconnected|did not finish within|did not come within|net::ERR_NO_BUFFER_SPACE/i;
 
 /**
  * Whether a render that failed is worth drawing again in new browsers: its browser crashed or stopped answering. A

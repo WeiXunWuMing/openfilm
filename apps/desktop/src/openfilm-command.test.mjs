@@ -4,7 +4,6 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { commandScript, commandScriptWindows } from './openfilm-command.mjs';
 
 test("the openfilm command alone has the app's ffmpeg first and its browser; the agent's PATH is left as it is", () => {
@@ -16,13 +15,13 @@ test("the openfilm command alone has the app's ffmpeg first and its browser; the
   assert.match(cmd, /setlocal\r\nset "PLAYWRIGHT_BROWSERS_PATH=C:\\pw"\r\nset "PATH=C:\\app\\ffmpeg;%PATH%"\r\n/);
 });
 
-test('a script run through as-node.mjs sees itself as the script, with its arguments, and no ELECTRON_RUN_AS_NODE', () => {
+test('a script run after as-node.mjs is the main module, with its arguments, and no ELECTRON_RUN_AS_NODE', () => {
   const dir = mkdtempSync(join(tmpdir(), 'openfilm-as-node-'));
   try {
     const script = join(dir, 'show.mjs');
-    writeFileSync(script, "console.log(JSON.stringify({ argv: process.argv.slice(1), runAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null }));\n");
-    const asNode = fileURLToPath(new URL('./as-node.mjs', import.meta.url));
-    const out = JSON.parse(execFileSync(process.execPath, [asNode, script, '--flag', 'x'], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8' }));
-    assert.deepEqual(out, { argv: [script, '--flag', 'x'], runAsNode: null });
+    writeFileSync(script, "console.log(JSON.stringify({ main: import.meta.main, argv: process.argv.slice(1), runAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null }));\n");
+    const asNode = new URL('./as-node.mjs', import.meta.url).href;
+    const out = JSON.parse(execFileSync(process.execPath, ['--import', asNode, script, '--flag', 'x'], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, encoding: 'utf8' }));
+    assert.deepEqual(out, { main: true, argv: [script, '--flag', 'x'], runAsNode: null });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -30,7 +30,7 @@ import { arch, homedir, release, tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join, win32 } from 'node:path';
 import { Readable, Writable } from 'node:stream';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as acp from '@agentclientprotocol/sdk';
 import { PATH_SEP, childEnvironment, lastPathSource, loginShellEnvironment, loginShellVariables, shellSubset } from './environment.mjs';
 import { AGENT_PROGRAMS, HOME_BIN_CANDIDATES, chosenProgram, codexAppCopies, codexVersion, desktopApp, detectAgentInstallation, installCommand, laterVersion, notTheAgent, searchReport } from './agent-installation.mjs';
@@ -250,13 +250,15 @@ const winArg = (a) => (/^[\w.:\\/=+@-]+$/.test(a) ? a : `"${String(a).replace(/"
 
 /** The app's own Node running a script, through as-node.mjs: what the script starts does not run Electron as Node. */
 const AS_NODE = fileURLToPath(new URL('./as-node.mjs', import.meta.url));
+/** The words before a script that start it on the app's own Node: as-node.mjs first, the script as the main module. */
+const asNode = (/** @type {string} */ script) => ['--import', pathToFileURL(AS_NODE).href, script];
 
 /**
  * How to start a program found for an agent: itself, a script with the app's own Node (an npm install on Windows), or
  * a `.cmd` shim whose target could not be told, through cmd.exe. `options` go to spawn.
  */
 function starting(cliPath, args) {
-  if (/\.(?:c|m)?js$/i.test(cliPath)) return { cmd: nodeBinary(), args: [AS_NODE, cliPath, ...args], env: { ELECTRON_RUN_AS_NODE: '1' }, options: {} };
+  if (/\.(?:c|m)?js$/i.test(cliPath)) return { cmd: nodeBinary(), args: [...asNode(cliPath), ...args], env: { ELECTRON_RUN_AS_NODE: '1' }, options: {} };
   if (windows && /\.(?:cmd|bat)$/i.test(cliPath)) {
     return { cmd: process.env.ComSpec || 'cmd.exe', args: ['/d', '/s', '/c', `"${[cliPath, ...args].map(winArg).join(' ')}"`], env: {}, options: { windowsVerbatimArguments: true } };
   }
@@ -659,7 +661,7 @@ function adapterLaunch(id, cliPath) {
   const node = nodeRuntime();
   return {
     cmd: node.command,
-    args: [...(node.env.ELECTRON_RUN_AS_NODE ? [AS_NODE] : []), adapterScript(spec.adapter)],
+    args: node.env.ELECTRON_RUN_AS_NODE ? asNode(adapterScript(spec.adapter)) : [adapterScript(spec.adapter)],
     env: { ...node.env, ...spec.env(cliPath) },
   };
 }
@@ -1086,7 +1088,7 @@ export class AgentSession {
     const script = harness ? fileURLToPath(new URL('./pi-agent.mjs', import.meta.url)) : native ? null : adapterScript(this.spec.adapter);
     this.child = native
       ? spawn(native.cmd, native.args, { ...native.options, cwd: this.opts.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
-      : spawn(node.command, [...(node.env.ELECTRON_RUN_AS_NODE ? [AS_NODE] : []), script], { cwd: this.opts.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+      : spawn(node.command, node.env.ELECTRON_RUN_AS_NODE ? asNode(script) : [script], { cwd: this.opts.cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     this.child.stderr.on('data', (d) => { this.stderr = (this.stderr + String(d)).slice(-16_000); });
     LIVE.add(this);
     this.child.once('exit', (code) => { LIVE.delete(this); this.exited = { code }; this.opts.onExit?.({ code, stderr: this.stderr }); });
@@ -1181,7 +1183,7 @@ export class AgentSession {
     this.opened = {
       program: harness ? 'pi' : cli.path,
       /* the command line the agent's process was started with: its own program, or the app's Node running its adapter (or Pi) */
-      command: native ? [native.cmd, ...native.args] : [node.command, ...(node.env.ELECTRON_RUN_AS_NODE ? [AS_NODE] : []), script],
+      command: native ? [native.cmd, ...native.args] : [node.command, ...(node.env.ELECTRON_RUN_AS_NODE ? asNode(script) : [script])],
       adapter: this.spec.adapter ?? null,
       env: Object.fromEntries(Object.entries(extra).map(([k, v]) => [k, secret.has(k) || /KEY|TOKEN|SECRET|PASSWORD/i.test(k) ? '(hidden)' : k === 'OPENFILM_PI' ? JSON.parse(v) : v])),
       ...(env.CODEX_CONFIG ? { codexConfig: JSON.parse(env.CODEX_CONFIG) } : {}),

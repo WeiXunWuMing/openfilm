@@ -465,3 +465,13 @@ test('a program chosen that is an editor, or not Cursor\'s own agent, is refused
   const { existsSync } = await import('node:fs');
   assert.equal(existsSync(`${code}.ran`) || existsSync(`${stray}.ran`), false);
 });
+
+test("a script the app's own Node starts runs as the main module, without ELECTRON_RUN_AS_NODE (an npm install on Windows)", async () => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  /* as DeepSeek Harness's bin.js does: it runs only when it is the main module, else it exits saying nothing */
+  const bin = join(mkdtempSync(join(tmpdir(), 'of-main-')), 'bin.mjs');
+  writeFileSync(bin, "if (import.meta.main) console.log(`0.2.1 ${process.env.ELECTRON_RUN_AS_NODE ?? 'clean'} ${process.argv.slice(2).join(' ')}`);\n");
+  assert.deepEqual(await checkAgentProgram('deepseek', bin), { ok: true, path: bin, version: '0.2.1 clean --version' });
+});
