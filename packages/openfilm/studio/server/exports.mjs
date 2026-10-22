@@ -33,7 +33,7 @@
  *       the scene stills bound as a deck (the scene's name in the speaker notes) or a PDF, one page each
  *   { kind: 'nle', format?: 'xml' (default) | 'fcpxml' | 'jianying' | 'capcut', fps? (snapped to 23.976, 24, 25, 29.97, 30, 50, 59.94 or 60;
  *     default 30), audio?: 'clips' (default) | 'stems', media?: 'copy' (default) | 'link', subtitles?: boolean (default true),
- *     alpha?: 'auto' | 'png' | 'prores' | 'prores4444', visuals?: 'effects' (default) | 'source' }
+ *     alpha?: 'auto' | 'png' | 'prores' | 'prores4444' }
  *       a folder an editing program opens (see nle.mjs): `<name>.xml` (xmeml: Premiere Pro, DaVinci Resolve) or `<name>.fcpxml` (Final Cut Pro), each
  *       web page rendered with its alpha to a MOV in media/ (`alpha`, for a draft: `auto`, the default, a page with no
  *       clear pixel in any frame as H.264 and the others as lossless PNG, each picture kept once for as long as it
@@ -98,7 +98,7 @@ export { exportsRoot };
  * @typedef {Framing & { kind: 'poster', format?: 'png' | 'jpg', shortEdge?: number, at?: number }} PosterAsk
  * @typedef {{ kind: 'subtitles', format?: 'srt' | 'vtt' | 'txt' }} SubtitlesAsk
  * @typedef {Framing & { kind: 'slides', format?: 'pptx' | 'pdf', shortEdge?: number, at?: number[] }} SlidesAsk
- * @typedef {{ kind: 'nle', format?: 'xml' | 'fcpxml' | 'jianying' | 'capcut', fps?: number, audio?: 'clips' | 'stems', media?: 'copy' | 'link', subtitles?: boolean, alpha?: 'auto' | 'png' | 'prores' | 'prores4444', visuals?: 'effects' | 'source' }} NleAsk
+ * @typedef {{ kind: 'nle', format?: 'xml' | 'fcpxml' | 'jianying' | 'capcut', fps?: number, audio?: 'clips' | 'stems', media?: 'copy' | 'link', subtitles?: boolean, alpha?: 'auto' | 'png' | 'prores' | 'prores4444' }} NleAsk
  * @typedef {{ kind: 'project', parts?: ProjectPart[], as?: 'zip' | 'folder' }} ProjectAsk
  * @typedef {typeof PROJECT_PARTS[number]} ProjectPart
  * @typedef {VideoAsk | GifAsk | AudioAsk | StillsAsk | PosterAsk | SubtitlesAsk | SlidesAsk | NleAsk | ProjectAsk} ExportSpec
@@ -380,7 +380,6 @@ function checked(/** @type {ExportAsk} */ ask) {
       if (!between(ask.fps, 1, 120)) throw new ExportError(`fps: ${NLE_FPS.join(', ')}`);
       if (ask.audio !== undefined && ask.audio !== 'clips' && ask.audio !== 'stems') throw new ExportError('audio: clips or stems');
       if (ask.media !== undefined && ask.media !== 'copy' && ask.media !== 'link') throw new ExportError('media: copy or link');
-      if (ask.visuals !== undefined && ask.visuals !== 'effects' && ask.visuals !== 'source') throw new ExportError('visuals: effects or source');
       if (ask.subtitles !== undefined && typeof ask.subtitles !== 'boolean') throw new ExportError('subtitles: true or false');
       if (ask.alpha !== undefined) {
         const draft = ask.format === 'jianying' || ask.format === 'capcut';
@@ -1263,7 +1262,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
       await mkdir(scratch, { recursive: true });
       await filmElsewhere(root, scratch, { stage: doc.stage, tracks: doc.tracks.map((t) => ({ ...t, hidden: false, muted: false })) });
       const probe = await open(scratch, { root });
-      /** @type {{ id: string, at: number, end: number, from: number, to: number, speed: number, native: number | null, w: number | null, h: number | null, look?: import('../../src/nle-picture.mjs').NleLook }[]} */
+      /** @type {{ id: string, at: number, end: number, from: number, to: number, speed: number, native: number | null, w: number | null, h: number | null, look?: import('./nle.mjs').NleLook }[]} */
       let loaded;
       try {
         loaded = await probe.film.page.evaluate(() => {
@@ -1354,7 +1353,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
 
       const timeline = planNleTimeline({ stage: doc.stage, duration: duration || 0.001, pictures, sounds },
         { title, fps, audio: mode, media: ask.media ?? 'copy', mediaDir: join(final, 'media'), stems: [...stems.keys()],
-          audioTracks: fcp ? 'source' : 'roles', alpha: prores ? 'prores4444' : 'png', visuals: ask.visuals });
+          audioTracks: fcp ? 'source' : 'roles', alpha: prores ? 'prores4444' : 'png' });
       const staged = (/** @type {import('./nle.mjs').NleFile} */ f) => join(staging, 'media', basename(f.path));
 
       /* each web page (and each picture Basic Motion can't place) drawn alone, full frame, with alpha. Several are drawn at

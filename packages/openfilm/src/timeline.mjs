@@ -1005,18 +1005,34 @@ window.__filmSpans = () => clips.map((c) => ({
  */
 function lookOf(c) {
   const css = getComputedStyle(c.el);
+  // Inactive clips are hidden by the timeline; check whether CSS also hides them when active.
+  const visibility = c.el.style.visibility;
+  c.el.style.visibility = 'visible';
+  const concealed = css.visibility !== 'visible';
+  c.el.style.visibility = visibility;
+  const placed = new DOMMatrix(c.el.style.transform || undefined).toFloat64Array();
+  const actual = new DOMMatrix(css.transform === 'none' ? undefined : css.transform).toFloat64Array();
+  // !important can override place(); allow the browser's 1/64-pixel layout rounding.
+  const moved = actual.some((v, i) => Math.abs(v - placed[i]) > 0.02)
+    || ['width', 'height', 'left', 'top'].some((key) => {
+      const expected = parseFloat(c.el.style[key]), value = parseFloat(css[key]);
+      return Number.isFinite(expected) && (!Number.isFinite(value) || Math.abs(value - expected) > 0.02);
+    });
   let parentEffect = false, animated = c.el.getAnimations().length > 0 || css.animationName !== 'none';
   for (let el = c.el.parentElement; el; el = el.parentElement) {
     const parent = getComputedStyle(el);
     parentEffect ||= parent.filter !== 'none' || parent.mixBlendMode !== 'normal' || Number(parent.opacity) !== 1
-      || parent.clipPath !== 'none' || parent.maskImage !== 'none' || parent.transform !== 'none';
+      || parent.clipPath !== 'none' || parent.maskImage !== 'none' || parent.transform !== 'none' || parent.display === 'none';
     animated ||= el.getAnimations().length > 0 || parent.animationName !== 'none';
   }
   return {
     fit: css.objectFit, position: css.objectPosition, radius: css.borderTopLeftRadius, opacity: c.faded && c.base != null ? String(c.base) : css.opacity,
     blend: css.mixBlendMode, clip: css.clipPath, filter: css.filter,
     animated,
-    extra: parentEffect || css.boxShadow !== 'none' || css.maskImage !== 'none' || css.backdropFilter !== 'none'
+    extra: parentEffect || moved || concealed || css.display === 'none' || css.visibility !== visibility
+      || css.position !== 'absolute' || css.transformOrigin !== '0px 0px' || css.margin !== '0px'
+      || css.translate !== 'none' || css.rotate !== 'none' || css.scale !== 'none'
+      || css.boxShadow !== 'none' || css.maskImage !== 'none' || css.backdropFilter !== 'none'
       || css.backgroundImage !== 'none' || css.backgroundColor !== 'rgba(0, 0, 0, 0)'
       || (css.outlineStyle !== 'none' && parseFloat(css.outlineWidth) > 0)
       || [css.borderTopWidth, css.borderRightWidth, css.borderBottomWidth, css.borderLeftWidth,

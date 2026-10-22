@@ -2643,15 +2643,6 @@ export function ProjectView({ projectId, onProject, onLeave }: {
     () => (film.film ? filmShape(film.film as unknown as FilmDoc, info?.spans ?? [], mediaFacts) : null),
     [film.film, info, mediaFacts],
   );
-  const exportPictures = React.useMemo(() => {
-    const measured = new Map(spans.map((s) => [s.id, s]));
-    return (film.film?.tracks ?? []).flatMap((track) => track.clips.filter((clip) => filmClipKind(clip) === 'video').map((clip) => {
-      const span = measured.get(clip.id);
-      return { id: clip.id, kind: filmSrcKind(clip.src) ?? 'video', box: clip.box as FilmBox | undefined,
-        facts: span ? { w: span.w, h: span.h } : null, look: span?.look,
-        styled: Boolean(clip.class || clip.style), faded: clipFades.has(clip.id) };
-    }));
-  }, [film.film, spans, clipFades]);
 
   if (failure) {
     return (
@@ -3162,7 +3153,6 @@ export function ProjectView({ projectId, onProject, onLeave }: {
         stage={stage}
         frame="native"
         film={exportFilm as never}
-        nlePictures={exportPictures}
         playheadMs={timeMs}
         mgBlocks={mgBlocks}
         {...(exportClipId ? { focusClipId: exportClipId } : {})}

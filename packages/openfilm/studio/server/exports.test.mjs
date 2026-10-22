@@ -7,8 +7,7 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createExports, diskFull, exportCapabilities, exportsRoot, ExportError, frameBox, dimsForShortEdge, keepChanges, projectFiles, projectSizes, shareOf, writableFolder } from './exports.mjs';
 import { encoders, hardwareEncoder } from '../../src/encoders.mjs';
-import { allocateLanes, fadeKeyframes, frameSpan, nleRate, planNleTimeline, xmemlDocument } from './nle.mjs';
-import { nlePictureMotion } from '../../src/nle-picture.mjs';
+import { allocateLanes, containMotion, fadeKeyframes, frameSpan, nleRate, planNleTimeline, xmemlDocument } from './nle.mjs';
 import { fcpxmlDocument } from './fcpxml.mjs';
 import { pptxParts } from './slides.mjs';
 import { filmSubtitleSrt, parseFilmSubtitleStyle } from './film-subtitle.mjs';
@@ -474,7 +473,6 @@ test('several exports at once, into a folder of the person\'s; one wrong ask que
   assert.ok(existsSync(join(folder, 'Batch - mix.wav')) && existsSync(join(folder, 'Batch poster.png')));
   const before = exports.list('p').length;
   assert.throws(() => exports.startAll(project(), { jobs: [{ kind: 'audio' }, { kind: 'nle', media: 'move' }] }), ExportError);
-  assert.throws(() => exports.startAll(project(), { jobs: [{ kind: 'audio' }, { kind: 'nle', visuals: 'invalid' }] }), /visuals: effects or source/);
   assert.throws(() => exports.startAll(project(), { jobs: [{ kind: 'audio' }], folder: 'relative/path' }), ExportError);
   assert.equal(exports.list('p').length, before);
 });
@@ -544,13 +542,12 @@ test('the editor\'s timeline: frames rounded edge by edge, tracks spread, placem
   assert.equal(nleRate(25).ntsc, false);
   assert.equal(frameSpan(0, 1.2345, rate).end, frameSpan(1.2345, 3, rate).start, 'back to back: no gap');
   assert.deepEqual(allocateLanes([{ start: 0, end: 10 }, { start: 5, end: 15 }, { start: 10, end: 20 }]), [0, 1, 0]);
-  const place = (facts, box) => nlePictureMotion({ kind: 'video', facts, box }, { w: 1920, h: 1080 });
-  assert.deepEqual(place({ w: 1920, h: 1080 }), { cropped: false });
-  assert.deepEqual(place({ w: 960, h: 540 }, { x: 480, y: 0, w: 960 }), { cropped: false, motion: { scale: 100, center: { h: 0, v: -0.25 } } });
+  assert.deepEqual(containMotion({ w: 1920, h: 1080 }, { w: 1920, h: 1080 }), { kind: 'none' });
+  assert.deepEqual(containMotion({ w: 960, h: 540 }, { w: 1920, h: 1080 }, { x: 480, y: 0, w: 960 }), { kind: 'motion', motion: { scale: 100, center: { h: 0, v: -0.25 } } });
   /* a box of another shape: the picture is fitted inside it, centered */
-  assert.deepEqual(place({ w: 100, h: 100 }, { x: 760, y: 0, w: 400, h: 200 }), { cropped: false, motion: { scale: 200, center: { h: 0, v: -0.407407 } } });
-  assert.equal(place({ w: 100, h: 100 }, { x: 0, y: 0, r: 10 }).motion.rotation, 10);
-  assert.equal(place({}), null);
+  assert.deepEqual(containMotion({ w: 100, h: 100 }, { w: 1920, h: 1080 }, { x: 760, y: 0, w: 400, h: 200 }), { kind: 'motion', motion: { scale: 200, center: { h: 0, v: -0.407407 } } });
+  assert.equal(containMotion({ w: 100, h: 100 }, { w: 1920, h: 1080 }, { x: 0, y: 0, r: 10 }).kind, 'bake');
+  assert.equal(containMotion({}, { w: 1920, h: 1080 }).kind, 'bake');
 });
 
 test('fades in the editor\'s timeline: a picture that fades is rendered; a sound that fades is its own part with level keyframes', () => {
@@ -821,57 +818,6 @@ test('Final Cut Pro export packages FCPXML, rendered pages, audio and optional s
   }
 });
 
-test('NLE originals: full recording files in every format, with appearance preserved by default', { ...ffmpeg, timeout: 300_000 }, async () => {
-  const cut = join(scratch, 'Original mode');
-  mkdirSync(cut, { recursive: true });
-  const original = join(cut, '原片 & take.mp4');
-  execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=160x90:rate=25:duration=4',
-    '-f', 'lavfi', '-i', 'sine=frequency=330:duration=4', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', original]);
-  const html = filmHtml({ stage: { w: 160, h: 90 }, tracks: [{ clips: [
-    { id: 'rendered', src: '原片 & take.mp4', time: [0.4, 1], speed: 0.5, class: 'tinted', volume: 0.5 },
-    { id: 'plain', src: '原片 & take.mp4', time: [1.2, 2.2], at: 1.2, class: 'placement', volume: 0.7 },
-  ] }] }).replace('</head>', '<style>.tinted{filter:saturate(.65) contrast(1.1)}.placement{object-fit:contain}</style></head>');
-  writeFileSync(join(cut, 'film.html'), html);
-  for (const format of ['xml', 'fcpxml', 'jianying', 'capcut']) {
-    const exports = createExports({ captions: subtitles, drafts: () => null });
-    const done = await ended(exports, exports.start(project(`Original ${format}`, cut), { kind: 'nle', format, fps: 25, visuals: 'source', subtitles: false }));
-    assert.equal(done.status, 'done', `${format}: ${done.error}`);
-    const copied = done.outputs.filter((f) => f.endsWith('.mp4'));
-    assert.equal(copied.length, 1, `${format}: one shared original`);
-    assert.ok(readFileSync(copied[0]).equals(readFileSync(original)), `${format}: the complete recording is byte-for-byte intact`);
-    assert.equal(done.outputs.filter((f) => /\.(mov|wav)$/.test(f)).length, 0, 'no trimmed replacement video or separate processed footage sound');
-    if (format === 'jianying' || format === 'capcut') {
-      const info = JSON.parse(readFileSync(done.out, 'utf8'));
-      const meta = JSON.parse(readFileSync(join(dirname(done.out), 'draft_meta_info.json'), 'utf8'));
-      assert.equal(info.materials.videos.length, 1);
-      assert.equal(info.materials.videos[0].duration, 4_000_000);
-      assert.equal(meta.draft_materials.find((g) => g.type === 0).value.length, 1);
-      const first = info.tracks[0].segments[0];
-      assert.equal(first.speed, 0.5);
-      assert.deepEqual(first.source_timerange, { start: 400_000, duration: 600_000 });
-      assert.deepEqual(first.target_timerange, { start: 0, duration: 1_200_000 });
-    } else {
-      const [{ error, found }] = await parseXml([readFileSync(done.out, 'utf8')], (doc) => ({
-        sources: doc.querySelectorAll('file > pathurl, resources > asset').length,
-        nativeSpeed: doc.querySelectorAll('timeMap, filter effectid').length,
-      }));
-      assert.equal(error, null);
-      assert.equal(found.sources, 1);
-      assert.ok(found.nativeSpeed > 0);
-    }
-  }
-  const exports = createExports({ captions: subtitles, drafts: () => null });
-  const done = await ended(exports, exports.start(project('Default appearance', cut), { kind: 'nle', format: 'jianying', fps: 25, subtitles: false }));
-  assert.equal(done.status, 'done', done.error);
-  const info = JSON.parse(readFileSync(done.out, 'utf8'));
-  assert.equal(info.materials.videos.length, 2, 'only the tinted picture is rendered; a plain class keeps the full original');
-  const first = info.tracks[0].segments[0];
-  const material = info.materials.videos.find((m) => m.id === first.material_id);
-  assert.ok(material.path.endsWith('rendered.mov'));
-  assert.equal(material.duration, 1_200_000);
-  assert.equal(first.speed, 1, 'the default has the look and speed baked into the replacement clip');
-});
-
 test('editing software: an xmeml folder; pages rendered with alpha, footage placed, sound as clips or stems, subtitles as SRT', { ...ffmpeg, timeout: 240_000 }, async () => {
   const cut = join(scratch, 'Cut');
   mkdirSync(join(cut, 'footage'), { recursive: true });
@@ -896,7 +842,7 @@ test('editing software: an xmeml folder; pages rendered with alpha, footage plac
   const folder = join(exportsRoot(), 'Cut · Editor XML');
   /* the outputs are this system's paths: Windows separates them with \ */
   const rel = done.outputs.map((f) => f.slice(folder.length + 1).replaceAll('\\', '/'));
-  assert.deepEqual(rel, ['Cut.xml', 'Cut.srt', 'media/badge.png', 'media/bed x2.wav', 'media/shot one.mp4',
+  assert.deepEqual(rel, ['Cut.xml', 'Cut.srt', 'media/badge.png', 'media/bed x2.wav', 'media/shot one x0.5.wav', 'media/shot one.mp4', 'media/slow.mov',
     'media/title-2.mov', 'media/title.mov', 'media/voice.wav']);
   assert.equal(done.out, join(folder, 'Cut.xml'));
   assert.equal(probe(join(folder, 'media', 'title.mov'), 'stream=codec_name,pix_fmt').split(',')[0], 'prores', 'ProRes 4444 for the other editors');
@@ -916,7 +862,6 @@ test('editing software: an xmeml folder; pages rendered with alpha, footage plac
     const clips = (kind) => [...doc.querySelectorAll(`sequence > media > ${kind} > track`)].map((track) => [...track.querySelectorAll(':scope > clipitem')].map((c) => ({
       name: text(c, ':scope > name'), enabled: text(c, ':scope > enabled'), start: Number(text(c, ':scope > start')), end: Number(text(c, ':scope > end')),
       in: Number(text(c, ':scope > in')), out: Number(text(c, ':scope > out')),
-      sourceOut: text(c, ':scope > pproTicksOut') === null ? null : Number(text(c, ':scope > pproTicksOut')) / 254016000000 * 25,
       effects: [...c.querySelectorAll(':scope > filter effectid')].map((e) => e.textContent), links: c.querySelectorAll(':scope > link').length,
       path: text(c, ':scope > file > pathurl'), file: c.querySelector(':scope > file')?.getAttribute('id'),
     })));
@@ -925,10 +870,9 @@ test('editing software: an xmeml folder; pages rendered with alpha, footage plac
   assert.equal(error, null);
   assert.equal(found.timebase, '25');
   /* V1 is film.html's last picture track: the footage, at its trim, scaled up from 160 × 90, linked to its sound; the
-     part at half speed retaining the same full recording */
+     part at half speed rendered */
   const [[shot, slow], [hidden], [badge], [title]] = found.video;
-  assert.deepEqual([slow.name, slow.start, slow.end, slow.in, slow.out, slow.effects], ['slow', 40, 60, 50, 70, ['basic', 'timeremap']]);
-  assert.equal(slow.file, shot.file);
+  assert.deepEqual([slow.name, slow.start, slow.end, slow.in, slow.out, slow.effects], ['slow', 40, 60, 0, 20, []]);
   assert.deepEqual([shot.name, shot.start, shot.end, shot.in, shot.out, shot.links], ['shot', 0, 40, 10, 50, 2]);
   assert.deepEqual(shot.effects, ['basic']);
   assert.match(shot.path, /media\/shot%20one\.mp4$/);
@@ -946,19 +890,18 @@ test('editing software: an xmeml folder; pages rendered with alpha, footage plac
     const media = paths.get(c.file);
     if (/\.png$/.test(media)) continue;
     const frames = Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', media]).toString()) * 25;
-    assert.ok((c.sourceOut ?? c.out) <= frames + 1, `${c.name}: its media has ${frames} frames, the clip plays to ${c.sourceOut ?? c.out}`);
+    assert.ok(c.out <= frames + 1, `${c.name}: its media has ${frames} frames, the clip plays to ${c.out}`);
     if (/ x[\d.]+\.wav$|\.mov$/.test(media)) assert.ok(Math.abs(frames - (c.end - c.start)) < 0.5 && c.in === 0, `${c.name}: ${frames} frames of media for ${c.end - c.start} on the timeline`);
   }
-  const slowSound = found.audio.flat().find((c) => c.name === 'slow');
-  assert.equal(slowSound.file, slow.file);
-  assert.equal(slowSound.sourceOut, 35);
-  assert.ok(slowSound.effects.includes('timeremap'), 'the original sound follows the picture at half speed');
+  /* sound to its end, not silence padded after half of it */
+  const tail = spawnSync('ffmpeg', ['-hide_banner', '-ss', '0.65', '-i', join(folder, 'media', 'shot one x0.5.wav'), '-af', 'volumedetect', '-f', 'null', '-'], { encoding: 'utf8' }).stderr;
+  assert.ok(Number(/max_volume: (-?[\d.]+) dB/.exec(tail)?.[1] ?? -99) > -20, 'the slowed sound plays to the end of its clip');
 
   /* the mixed stems instead, the media left where it is */
   const stems = await exported({ kind: 'nle', fps: 25, audio: 'stems', media: 'link', subtitles: false }, 'Cut', cut);
   const folder2 = join(exportsRoot(), 'Cut · Editor XML 2');
   assert.deepEqual(stems.outputs.map((f) => f.slice(folder2.length + 1).replaceAll('\\', '/')),
-    ['Cut.xml', 'media/Cut - footage.wav', 'media/Cut - voice.wav', 'media/badge.png', 'media/title-2.mov', 'media/title.mov']);
+    ['Cut.xml', 'media/Cut - footage.wav', 'media/Cut - voice.wav', 'media/badge.png', 'media/slow.mov', 'media/title-2.mov', 'media/title.mov']);
   const xml = readFileSync(stems.out, 'utf8');
   assert.match(xml, /<pathurl>file:\/\/localhost\/[^<]*\/Cut\/footage\/shot%20one\.mp4<\/pathurl>/, 'linked to the footage where it is');
   assert.ok(!xml.includes('<link>'), 'a stem is not linked to a picture');

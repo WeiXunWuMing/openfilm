@@ -7,37 +7,9 @@ import { join } from 'node:path';
 import { FilmPage, launch, serve } from './host.mjs';
 import { open } from './shared.mjs';
 import { filmHead, filmHtml } from './film-doc.mjs';
-import { nlePictureEffects } from './nle-picture.mjs';
 
 const page = (word, seconds) => `<!doctype html><body style="margin:0;background:#123"><p>${word}</p>
 <script>window.film={duration:${seconds},width:320,height:180,frame(){}}</script></body>`;
-
-test('export look detection ignores inactive outlines and plain classes, but reports real CSS effects and animation', { timeout: 60_000 }, async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'of-export-look-'));
-  writeFileSync(join(dir, 'picture.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="320" height="180" fill="red"/></svg>');
-  writeFileSync(join(dir, 'film.html'), filmHtml({ stage: { w: 320, h: 180 }, tracks: [{ clips:
-    ['plain', 'tinted', 'outlined', 'animated'].map((id) => ({ id, src: 'picture.svg', time: [0, 1], class: id })),
-  }, { attrs: { class: 'tinted' }, clips: [{ id: 'parented', src: 'picture.svg', time: [0, 1] }] }] }).replace('</head>', `<style>
-    .plain{outline-width:3px;outline-style:none;object-fit:contain}
-    .tinted{filter:brightness(.8)}
-    .outlined{outline:3px solid blue}
-    </style></head>`));
-  const s = await open(dir);
-  try {
-    await s.film.page.evaluate(() => {
-      document.getElementById('animated').animate([{ opacity: 0.2 }, { opacity: 0.8 }], { duration: 2000, iterations: Infinity });
-    });
-    const spans = await s.film.page.evaluate(() => window.__filmSpans());
-    const effects = Object.fromEntries(spans.map((span) => [span.id,
-      nlePictureEffects({ kind: 'still', facts: { w: span.w, h: span.h }, styled: true, look: span.look }, { w: 320, h: 180 }),
-    ]));
-    assert.deepEqual(effects.plain, []);
-    assert.deepEqual(effects.tinted, ['filter']);
-    assert.ok(effects.outlined.includes('other'));
-    assert.ok(effects.animated.includes('animation'));
-    assert.ok(effects.parented.includes('other'), 'a track’s filter affects its pictures too');
-  } finally { await s.close(); }
-});
 
 test('a hidden track\'s clips are still placed for an editor, but neither drawn nor counted in the film\'s length', { timeout: 60_000 }, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'of-hidden-'));
