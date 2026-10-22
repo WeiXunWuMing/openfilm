@@ -83,6 +83,14 @@ test('media under assets/ at any depth, pages outside it, folders even when empt
   assert.deepEqual(pages.map((p) => p.path), ['index.html', 'scenes/title.html']);
 });
 
+test('pages beyond the existing depth limit are reported as unscanned', async () => {
+  put('scenes/one/two/visible.html');
+  put('scenes/one/two/three/hidden.html');
+  const listing = await listFiles(root);
+  assert.deepEqual(listing.pages.map((page) => page.path), ['scenes/one/two/visible.html']);
+  assert.deepEqual(listing.truncated, ['scenes/one/two/three']);
+});
+
 test('an import is streamed under a free name, and a failed one leaves nothing', async () => {
   put('assets/clip.mp4', 'old');
   const { path: landed } = await importFile(root, 'assets/clip.mp4', Readable.from([Buffer.from('new '), Buffer.from('bytes')]));

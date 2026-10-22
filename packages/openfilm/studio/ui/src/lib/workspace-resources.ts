@@ -121,6 +121,10 @@ export interface FilesListing {
   pages: readonly { path: string; size: number; mtime: number }[];
   /** Links to media kept elsewhere, by project path (files and folders). */
   links?: Readonly<Record<string, MediaLink>>;
+  /** Entries that could not be read: a partial listing, not proof that the library is empty. */
+  unreadable?: readonly string[];
+  /** Folders not entered because of the listing's depth limits. */
+  truncated?: readonly string[];
 }
 
 const MEDIA_KINDS: readonly string[] = ['video', 'image', 'audio'];

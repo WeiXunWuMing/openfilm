@@ -163,8 +163,9 @@ export function kindOf(/** @type {string} */ name) {
 }
 
 /**
- * The project's media (everything under assets/, any depth) and its web pages (.html outside assets/, three folders
- * deep at most, film.html not among them), with sizes and times. `folders` lists every folder under assets/, empty ones included; `made` the ones
+ * The project's media (under assets/, up to eight folders deep) and its web pages (.html outside assets/, three folders
+ * deep at most, film.html not among them), with sizes and times. Deeper folders are reported in `truncated`.
+ * `folders` includes empty folders; `made` the ones
  * a person made (they keep a `.gitkeep`, so an empty one is shown and kept in history).
  * @param {string} root
  */
@@ -180,10 +181,20 @@ export async function listFiles(root) {
   const pages = [];
   /** @type {Record<string, { to: string, missing?: true }>} */
   const links = {};
+  /** @type {string[]} */
+  const unreadable = [];
+  /** @type {string[]} */
+  const truncated = [];
 
   async function walk(/** @type {string} */ dir, /** @type {number} */ depth, /** @type {boolean} */ media) {
     let entries;
-    try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
+    try { entries = await readdir(dir, { withFileTypes: true }); } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT' && dir === join(root, ASSETS)) return;
+      const rel = posix(relative(root, dir)) || '.';
+      unreadable.push(rel);
+      if (links[rel]) links[rel].missing = true;
+      return;
+    }
     for (const entry of entries) {
       if (media && entry.name === KEEP && entry.isFile()) made.push(posix(relative(root, dir)));
       if (entry.name.startsWith('.')) continue;
@@ -195,7 +206,11 @@ export async function listFiles(root) {
         const to = await readlink(abs).catch(() => '');
         const info = readableLink(root, abs) ? await stat(abs).catch(() => null) : null;
         links[rel] = { to: isAbsolute(to) ? to : join(dir, to), ...(info ? {} : { missing: true }) };
-        if (info?.isDirectory()) { folders.push(rel); if (depth < 8) await walk(abs, depth + 1, true); continue; }
+        if (info?.isDirectory()) {
+          folders.push(rel);
+          if (depth < 8) await walk(abs, depth + 1, true); else truncated.push(rel);
+          continue;
+        }
         const own = await lstat(abs).catch(() => null);
         const at = info ?? own;
         /* `added`: when the link was made, not when what it leads to last changed */
@@ -203,12 +218,12 @@ export async function listFiles(root) {
         continue;
       }
       if (entry.isDirectory()) {
-        if (media) { folders.push(rel); if (depth < 8) await walk(abs, depth + 1, true); }
-        else if (!SKIP.has(entry.name) && depth < 3) await walk(abs, depth + 1, false);
+        if (media) { folders.push(rel); if (depth < 8) await walk(abs, depth + 1, true); else truncated.push(rel); }
+        else if (!SKIP.has(entry.name)) { if (depth < 3) await walk(abs, depth + 1, false); else truncated.push(rel); }
         continue;
       }
       if (!entry.isFile()) continue;
-      const info = await stat(abs).catch(() => null);
+      const info = await stat(abs).catch(() => { unreadable.push(rel); return null; });
       if (!info) continue;
       if (media) files.push({ path: rel, kind: kindOf(entry.name), size: info.size, mtime: Math.round(info.mtimeMs), added: Math.round(info.mtimeMs) });
       /* the film is not one of its pages */
@@ -218,7 +233,8 @@ export async function listFiles(root) {
   await walk(join(root, ASSETS), 0, true);
   await walk(root, 0, false);
   const sort = (/** @type {{ path: string }} */ a, /** @type {{ path: string }} */ b) => a.path.localeCompare(b.path, undefined, { numeric: true });
-  return { files: files.sort(sort), folders: folders.sort(), made: made.sort(), pages: pages.sort(sort), links };
+  return { files: files.sort(sort), folders: folders.sort(), made: made.sort(), pages: pages.sort(sort), links,
+    ...(unreadable.length ? { unreadable: unreadable.sort() } : {}), ...(truncated.length ? { truncated: truncated.sort() } : {}) };
 }
 
 /** The file that marks a folder a person made: it keeps an empty folder in the listing and in history. */

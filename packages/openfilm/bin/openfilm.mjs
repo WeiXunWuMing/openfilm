@@ -8,16 +8,23 @@ const USAGE = `openfilm — a film is a function of time: given t, it draws that
   openfilm look    [what] [t | a-b]    check the film and draw it: a contact sheet with its sound and loudness
   openfilm render  [a-b]               the MP4, saved beside film.html
   openfilm get     [what] [--options]  voice-over, music, sound effects, transcripts, images, video, from a connected service
+  openfilm media   [assets/path]      list media metadata and linked folders, without reading the media contents
   openfilm skills                      the skills this film can be made with; \`openfilm skill <name>\` prints one
   openfilm update                      the newest OpenFilm; Studio starts again on it
   openfilm doctor                      what this computer has for OpenFilm, to paste into an issue
 
   Run with no arguments for the manual; \`openfilm <command> --help\` for one command's options; --version for the version.
-  look, render and get work on the project around the current folder.
+  look, render, get and media work on the project around the current folder.
   Exit status: 0 done, 1 the film or the command failed (the output says why), 2 not a project or a wrong command.`;
 
 /* one command's help: what it does, what it takes, where its output goes */
 const COMMAND_HELP = {
+  media: `openfilm media [assets/folder-or-file]
+
+  Read-only JSON metadata from the project's media library: paths, kinds, sizes, modification times and link targets.
+  Includes files inside approved linked folders and the status of unavailable links. A path limits the listing.
+  A partial listing reports unreadable entries and folders beyond the depth limit as unreadable and truncated paths.
+  No pictures, transcripts or media contents are read. Use look <file> to inspect one file's picture and sound.`,
   open: `openfilm open [folder | url]
 
   folder   a new film: a folder named after it (made if missing); or an existing project
@@ -153,6 +160,7 @@ for (const [name, [lo, hi, whole]] of Object.entries(RANGES)) {
 }
 const commands = {
   open: () => open(args[0] ?? null),
+  media: () => import('../src/media-cli.mjs').then((m) => m.mediaCommand(args)),
   look: () => import('../src/look.mjs').then((m) => m.look(args, opts)),
   /* below the person's own apps, with every browser and encoder it starts: a render takes the computer whole only
      while nothing else wants it */

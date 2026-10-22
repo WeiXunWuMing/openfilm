@@ -29,6 +29,7 @@ import type { Balance } from '@/lib/balance';
 import { chatTurns, putChatTurn, type SavedTurn } from '@/lib/chat-store';
 import { app } from '../app-bridge';
 import { isEmptyBackgroundTurn, opensUnprompted } from '@/lib/unprompted';
+import { prepareMediaPrompt } from '@/lib/project-media';
 import { reduceTranscript, type TranscriptItem, type TranscriptPlanEntry } from '@/lib/agent-transcript';
 import {
   desktopBridge,
@@ -285,6 +286,9 @@ type Listener = () => void;
 
 /** One local agent turn: the transcript and some state, both external stores, so only subscribers re-render. */
 export class LocalAgentTurn {
+  readonly cancellation = new AbortController();
+  /** A steering message can be stopped before the agent accepts it. */
+  preparingKey?: string;
   items: TranscriptItem[] = [];
   state: LocalRunState = { thinking: false, revision: 0, permission: null, question: null, error: null, balance: null };
   private listeners = new Set<Listener>();
@@ -537,6 +541,7 @@ interface LiveSession {
   /** the project and the conversation it is the session of */
   projectId: string;
   conversation: string;
+  mediaRevision?: string;
 }
 
 const sessions = new Map<string, LiveSession>();
@@ -796,6 +801,7 @@ export function useLocalAgentTurn(turnId: string | null): { turn: LocalAgentTurn
  */
 export async function runLocalAgentTurn({
   projectId,
+  studioProjectId,
   conversation,
   resume = null,
   agent,
@@ -808,6 +814,8 @@ export async function runLocalAgentTurn({
   images,
 }: {
   projectId: string;
+  /** Studio's API id; projectId above is the chat store's project path. */
+  studioProjectId: string;
   /** the chat's conversation: each has its own session of the agent's */
   conversation: string;
   /** the agent's own id of this conversation, from a turn before (ProjectSessionItem.agentSessions) */
@@ -826,6 +834,10 @@ export async function runLocalAgentTurn({
 }): Promise<{ stopReason: string; lastTurnId: string }> {
   const bridge = desktopBridge()?.localAgents;
   if (!bridge) throw new Error('This needs the OpenFilm Mac app.');
+  if (turn.cancellation.signal.aborted) {
+    turn.seal();
+    return { stopReason: 'cancelled', lastTurnId: turn.turnId };
+  }
   listen();
   turns.set(turn.turnId, turn);
   current = turn;
@@ -866,18 +878,23 @@ export async function runLocalAgentTurn({
   for (const entry of picked.filter(isModel)) await setOption(entry);
   for (const entry of picked.filter((entry) => !isModel(entry))) await setOption(entry);
 
-  /* where it is and how to work (the project, the `openfilm` manual, Studio already open) it was told when the
-     session started (apps/desktop src/agents.mjs INSTRUCTIONS): the message goes as the person wrote it */
   const key = session.key;
   /* the turn the agent's words go to at the end: this one, or the last message sent into it while it ran (steer) */
   const last = () => turnByKey.get(key) ?? turn;
   try {
-    const r = await bridge.prompt(key, text, meta, images?.length ? images : undefined);
+    const prepared = await prepareMediaPrompt(studioProjectId, text, live.mediaRevision, turn.cancellation.signal);
+    turn.cancellation.signal.throwIfAborted();
+    live.mediaRevision = prepared.revision;
+    const r = await bridge.prompt(key, prepared.text, meta, images?.length ? images : undefined);
     /* The answer to the prompt can overtake its last updates (the closing words of its reply): stop
        listening only once they have stopped coming, or the saved reply ends mid-sentence. */
     await drain(last());
     if (!r.ok) throw Object.assign(new Error(r.error), { lastTurnId: last().turnId }, r.balance ? { balance: r.balance } : {});
     return { stopReason: r.stopReason, lastTurnId: last().turnId };
+  } catch (error) {
+    live.mediaRevision = undefined;
+    if (turn.cancellation.signal.aborted) return { stopReason: 'cancelled', lastTurnId: last().turnId };
+    throw error;
   } finally {
     const ended = last();
     turn.seal();
@@ -904,19 +921,36 @@ export function canSteer(turnId: string): boolean {
  * agent says and does from then on goes to `next` (the message's own turn in the conversation), and `from` is done.
  * False when it did not join (the turn ended meanwhile, the agent refused): the caller sends it as a turn of its own.
  */
-export async function steerLocalAgentTurn(fromTurnId: string, next: LocalAgentTurn, text: string, images?: PromptImage[]): Promise<boolean> {
+export async function steerLocalAgentTurn(studioProjectId: string, fromTurnId: string, next: LocalAgentTurn, text: string, images?: PromptImage[]): Promise<boolean> {
   const bridge = desktopBridge()?.localAgents;
   const key = [...turnByKey].find(([, t]) => t.turnId === fromTurnId)?.[0];
   if (!bridge?.steer || !key) return false;
-  turns.set(next.turnId, next);
-  const r = await bridge.steer(key, text, images?.length ? images : undefined).catch(() => null);
+  const live = [...sessions.values()].find((session) => session.key === key);
   const from = turnByKey.get(key);
-  if (!r?.ok || !from || from.turnId !== fromTurnId) return false;
-  await drain(from, 150, 1000);
-  from.seal();
-  turnByKey.set(key, next);
-  current = next;
-  return true;
+  if (!live || !from) return false;
+  turns.set(next.turnId, next);
+  next.preparingKey = key;
+  const signal = AbortSignal.any([from.cancellation.signal, next.cancellation.signal]);
+  try {
+    const prepared = await prepareMediaPrompt(studioProjectId, text, live.mediaRevision, signal);
+    signal.throwIfAborted();
+    const r = await bridge.steer(key, prepared.text, images?.length ? images : undefined).catch(() => null);
+    signal.throwIfAborted();
+    if (r?.ok) live.mediaRevision = prepared.revision;
+    if (!r?.ok || turnByKey.get(key) !== from) return false;
+    await drain(from, 150, 1000);
+    signal.throwIfAborted();
+    from.seal();
+    turnByKey.set(key, next);
+    current = next;
+    return true;
+  } catch (error) {
+    if (!signal.aborted) throw error;
+    next.cancellation.abort();
+    return false;
+  } finally {
+    next.preparingKey = undefined;
+  }
 }
 
 export interface RecoveredLocalTurn {
@@ -995,12 +1029,12 @@ export async function cancelLocalAgentTurn(turnId: string): Promise<void> {
   const bridge = desktopBridge()?.localAgents;
   const turn = turns.get(turnId);
   if (!bridge || !turn) return;
-  for (const [key, t] of turnByKey) {
-    if (t !== turn) continue;
-    /* a turn the agent started by itself has no prompt of the page's to end it: it ends here, and the agent is told */
-    if (unprompted.get(key)?.turn === turn) endUnprompted(key, 'cancelled');
-    await bridge.cancel(key);
-  }
+  turn.cancellation.abort();
+  const key = turn.preparingKey ?? [...turnByKey].find(([, t]) => t === turn)?.[0];
+  if (!key) return;
+  /* a turn the agent started by itself has no prompt of the page's to end it: it ends here, and the agent is told */
+  if (unprompted.get(key)?.turn === turn) endUnprompted(key, 'cancelled');
+  await bridge.cancel(key);
 }
 
 export async function answerLocalAgentPermission(turnId: string, optionId: string | null): Promise<void> {

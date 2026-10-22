@@ -642,6 +642,7 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
     const resume = sessions.find((s) => s.id === sessionId)?.agentSessions?.[agent] ?? null;
     const run = Promise.all([prepared, ready]).then(([{ text, images, skills }]) => runLocalAgentTurn({
       projectId: projectKey,
+      studioProjectId: project.id,
       conversation: sessionId,
       resume,
       agent,
@@ -686,7 +687,7 @@ function ChatPane({ project, banners, selection, assetsOpen }: { project: Projec
     /* the agent's run going now (one at a time in a conversation): a message that did not join waits for it */
     const run = [...runs.current.values()].at(-1) ?? Promise.resolve();
     void Promise.all([prepared, opened.ready]).then(async ([{ text, images, skills }]) => {
-      if (await steerLocalAgentTurn(fromId, opened.turn, text, images)) {
+      if (await steerLocalAgentTurn(project.id, fromId, opened.turn, text, images)) {
         settlers.current.get(fromId)?.({ status: 'ready' });
         return;
       }
