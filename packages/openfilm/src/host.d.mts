@@ -8,10 +8,8 @@ export interface LaunchOptions { headed?: boolean; channel?: string | null; args
 export declare function launch(opts?: LaunchOptions): Promise<Browser>;
 /** A renderer string that is not a GPU: WebGL drawn on the CPU. */
 export declare const SOFTWARE_GL: RegExp;
-/** Windows: prefer a GPU-backed D3D11 renderer, then Vulkan, then Chromium's default; cache the chosen backend. */
+/** Windows: use D3D11 only on the GPU selected by Vulkan; cache the choice, or fall back to Chromium's default. */
 export declare function windowsGpuFirst(renderer?: (browser: Browser) => Promise<string>): (open: (angle: string[]) => Promise<Browser>) => Promise<Browser>;
-/** @deprecated Use windowsGpuFirst. */
-export declare const vulkanFirst: typeof windowsGpuFirst;
 /** Close every browser launch() opened that is still open: what waits on one fails at once instead of never answering. */
 export declare function closeBrowsers(): Promise<void>;
 /** With `offline`: the origins still open to a page, and optionally who answers them (a cache). */

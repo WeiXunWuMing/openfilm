@@ -288,8 +288,8 @@ async function rendererOf(browser) {
 
 /**
  * Windows: Vulkan can report a real GPU while paused HEVC frames never present, making every seek wait five seconds.
- * Prefer D3D11, then Vulkan if it cannot start or draws in software, then Chromium's default. Read the renderer once
- * per candidate and reuse the selected backend for every later browser.
+ * Use D3D11 only when it reports the GPU Vulkan selected: on hybrid laptops it can otherwise pick the integrated
+ * GPU. Probe once per candidate and cache the choice; without hardware Vulkan, keep Chromium's default fallback.
  * @param {(browser: import('playwright-core').Browser) => Promise<string>} [renderer]
  */
 export function windowsGpuFirst(renderer = rendererOf) {
@@ -301,21 +301,43 @@ export function windowsGpuFirst(renderer = rendererOf) {
     /** @type {(angle: string[]) => void} */
     let choose = () => {};
     chosen = new Promise((r) => { choose = r; });
-    for (const angle of [['--use-angle=d3d11'], ['--use-angle=vulkan']]) {
+    const probe = async (/** @type {string[]} */ angle) => {
       const browser = await open(angle).catch(() => null);
       const gpu = browser ? await inTime(renderer(browser), 30_000, 'no renderer').catch(() => 'none') : 'none';
-      if (browser && gpu !== 'none' && !SOFTWARE_GL.test(gpu)) {
-        choose(angle);
-        return browser;
-      }
+      if (browser && gpu && gpu !== 'none' && !SOFTWARE_GL.test(gpu)) return { browser, gpu };
       await browser?.close().catch(() => {});
+      return null;
+    };
+    const vulkan = ['--use-angle=vulkan'], d3d11 = ['--use-angle=d3d11'];
+    const reference = await probe(vulkan);
+    if (reference) {
+      const expected = gpuIdentity(reference.gpu);
+      const candidate = expected ? await probe(d3d11) : null;
+      const actual = candidate && gpuIdentity(candidate.gpu);
+      if (expected && candidate && actual && actual.name === expected.name && (!actual.id || !expected.id || actual.id === expected.id)) {
+        await reference.browser.close().catch(() => {});
+        choose(d3d11);
+        return candidate.browser;
+      }
+      await candidate?.browser.close().catch(() => {});
+      choose(vulkan);
+      return reference.browser;
     }
     choose([]);
     return open([]);
   };
 }
-/** @deprecated Use windowsGpuFirst. */
-export const vulkanFirst = windowsGpuFirst;
+/** Compare the device name, excluding ANGLE's backend/driver suffix; unknown descriptions cannot prove a match. */
+function gpuIdentity(/** @type {string} */ renderer) {
+  const model = /^ANGLE \([^,]+, Vulkan [^(]+\((.+)\), .+\)$/.exec(renderer)?.[1]
+    ?? /^ANGLE \([^,]+, (.+) Direct3D11\b/.exec(renderer)?.[1];
+  if (!model) return null;
+  const id = /\s*\((0x[\da-f]+)\)$/i.exec(model);
+  // ANGLE's Vulkan description can repeat the vendor, e.g. "NVIDIA NVIDIA GeForce ...".
+  const name = model.slice(0, id?.index ?? model.length).trim().replace(/\s+/g, ' ').toLowerCase().replace(/^(nvidia|amd|intel) \1 /, '$1 ');
+  if (!name) return null;
+  return { name, id: id ? parseInt(id[1], 16).toString(16) : undefined };
+}
 const onWindows = windowsGpuFirst();
 
 /** Every browser launch() opened and that is still open. */

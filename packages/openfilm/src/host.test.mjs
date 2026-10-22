@@ -7,7 +7,7 @@ import { get } from 'node:http';
 import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { serve, vulkanFirst, windowsGpuFirst } from './host.mjs';
+import { serve, windowsGpuFirst } from './host.mjs';
 import { locate } from './shared.mjs';
 
 test('cancelled media requests close their files so the project can be renamed', { timeout: 10000 }, async (t) => {
@@ -111,59 +111,81 @@ test('look and render serve the film\'s project, never the folders around it', (
   }
 });
 
-test('Windows: prefer D3D11, then Vulkan, then the default; cache the choice across concurrent launches', async () => {
-  /** A launcher that records what each browser was opened with; `fails` makes explicit backends throw. */
-  const launcher = (fails = false) => {
-    const opened = /** @type {string[][]} */ ([]), closed = /** @type {string[][]} */ ([]);
-    const open = async (/** @type {string[]} */ angle) => {
-      opened.push(angle);
-      if (fails && angle.length) throw new Error('no graphics driver');
-      return /** @type {any} */ ({ angle, close: async () => { closed.push(angle); } });
-    };
-    return { open, opened, closed };
+const VULKAN = '--use-angle=vulkan', D3D11 = '--use-angle=d3d11';
+const NVIDIA_VK = 'ANGLE (NVIDIA, Vulkan 1.4.351 (NVIDIA NVIDIA GeForce RTX 3060 Ti (0x00002489)), NVIDIA)';
+const NVIDIA_D3D = 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Ti (0x00002489) Direct3D11 vs_5_0 ps_5_0, D3D11)';
+const WARP = 'ANGLE (Microsoft, Microsoft Basic Render Driver (0x0000008C) Direct3D11 vs_5_0 ps_5_0, D3D11)';
+function gpuLauncher(vulkan = NVIDIA_VK, d3d11 = NVIDIA_D3D, failed = []) {
+  const opened = [], closed = [], reads = [];
+  const open = async (angle) => {
+    const backend = angle[0] ?? 'default';
+    opened.push(backend);
+    if (failed.includes(backend)) throw new Error('no graphics driver');
+    return { backend, close: async () => { closed.push(backend); } };
   };
-  const reads = (/** @type {() => Promise<string>} */ said) => {
-    let count = 0;
-    return { renderer: async () => { count++; return said(); }, get count() { return count; } };
-  };
-  const d3d11 = ['--use-angle=d3d11'], vulkan = ['--use-angle=vulkan'];
+  const pick = windowsGpuFirst(async (browser) => {
+    reads.push(browser.backend);
+    const value = browser.backend === VULKAN ? vulkan : d3d11;
+    if (value instanceof Error) throw value;
+    return value;
+  });
+  return { open, pick, opened, closed, reads };
+}
 
-  const gpu = reads(async () => 'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Ti Direct3D11 vs_5_0 ps_5_0, D3D11)');
-  let l = launcher(), pick = windowsGpuFirst(gpu.renderer);
-  const browsers = await Promise.all([pick(l.open), pick(l.open), pick(l.open)]);
-  assert.deepEqual(browsers.map((b) => b.angle), [d3d11, d3d11, d3d11]);
-  assert.equal(gpu.count, 1);
-  assert.deepEqual(l.closed, []);
-
-  let attempt = 0;
-  const fallback = reads(async () => ++attempt === 1 ? 'none' : 'ANGLE (NVIDIA, Vulkan, NVIDIA)');
-  l = launcher(); pick = windowsGpuFirst(fallback.renderer);
-  const [fallbackFirst, fallbackSecond] = await Promise.all([pick(l.open), pick(l.open)]);
-  assert.deepEqual([fallbackFirst.angle, fallbackSecond.angle], [vulkan, vulkan]);
-  assert.deepEqual(l.opened, [d3d11, vulkan, vulkan]);
-  assert.deepEqual(l.closed, [d3d11]);
-  assert.equal(fallback.count, 2);
-
-  /* WARP is Microsoft's own software rasteriser: a machine with no GPU driver, or a remote session, reads it. */
-  for (const said of [
-    async () => 'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)',
-    async () => 'ANGLE (Microsoft, Microsoft Basic Render Driver (0x0000008C) Direct3D11 vs_5_0 ps_5_0, D3D11)',
-    async () => 'none',
-    async () => { throw new Error('page crashed'); },
-  ]) {
-    const software = reads(said);
-    l = launcher(); pick = windowsGpuFirst(software.renderer);
-    const [first, second] = await Promise.all([pick(l.open), pick(l.open)]);
-    assert.deepEqual([first.angle, second.angle], [[], []]);
-    assert.deepEqual(l.opened, [d3d11, vulkan, [], []]);
-    assert.deepEqual(l.closed, [d3d11, vulkan]);
-    assert.equal(software.count, 2);
+test('Windows: D3D11 must report Vulkan’s GPU; selection is shared by concurrent and later launches', async () => {
+  for (const reference of [NVIDIA_VK, NVIDIA_VK.replace('NVIDIA NVIDIA', 'NVIDIA')]) {
+    for (const description of [NVIDIA_D3D, NVIDIA_D3D.replace(' (0x00002489)', ''), NVIDIA_D3D.replace('0x00002489', '0x2489'), NVIDIA_D3D.replace('RTX 3060', 'rtx  3060')]) {
+      const l = gpuLauncher(reference, description);
+      const browsers = await Promise.all([l.pick(l.open), l.pick(l.open), l.pick(l.open)]);
+      assert.deepEqual(browsers.map(b => b.backend), [D3D11, D3D11, D3D11]);
+      assert.deepEqual(l.opened, [VULKAN, D3D11, D3D11, D3D11]);
+      assert.deepEqual(l.reads, [VULKAN, D3D11]);
+      assert.deepEqual(l.closed, [VULKAN], 'the unused probe browser is closed');
+    }
   }
+});
 
-  const never = reads(async () => 'unused');
-  l = launcher(true); pick = vulkanFirst(never.renderer);
-  assert.deepEqual((await pick(l.open)).angle, []);
-  assert.deepEqual((await pick(l.open)).angle, []);
-  assert.deepEqual(l.opened, [d3d11, vulkan, [], []]);
-  assert.equal(never.count, 0);
+test('Windows: a different hardware GPU or an unidentified D3D11 device retains Vulkan', async () => {
+  for (const description of [
+    'ANGLE (Intel, Intel(R) UHD Graphics 770 (0x00004680) Direct3D11 vs_5_0 ps_5_0, D3D11)',
+    NVIDIA_D3D.replace('3060 Ti', '5070 Laptop GPU'),
+    NVIDIA_D3D.replace('0x00002489', '0x00002D58'),
+    'ANGLE (NVIDIA, unknown device, D3D11)',
+  ]) {
+    const l = gpuLauncher(NVIDIA_VK, description);
+    const browsers = await Promise.all([l.pick(l.open), l.pick(l.open)]);
+    assert.deepEqual(browsers.map(b => b.backend), [VULKAN, VULKAN]);
+    assert.deepEqual(l.opened, [VULKAN, D3D11, VULKAN]);
+    assert.deepEqual(l.closed, [D3D11]);
+    assert.deepEqual(l.reads, [VULKAN, D3D11]);
+  }
+});
+
+test('Windows: unavailable or software D3D11 retains the working Vulkan browser', async () => {
+  for (const [description, failed] of [[WARP, []], ['none', []], [new Error('page crashed'), []], [NVIDIA_D3D, [D3D11]]]) {
+    const l = gpuLauncher(NVIDIA_VK, description, failed);
+    assert.equal((await l.pick(l.open)).backend, VULKAN);
+    assert.equal((await l.pick(l.open)).backend, VULKAN);
+    assert.deepEqual(l.closed, failed.length ? [] : [D3D11]);
+    assert.deepEqual(l.reads, failed.length ? [VULKAN] : [VULKAN, D3D11]);
+  }
+});
+
+test('Windows: without hardware Vulkan no GPU match is assumed; fall back to Chromium’s default', async () => {
+  for (const [description, failed] of [
+    ['ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)', []],
+    [WARP, []], ['none', []], ['', []], [new Error('page crashed'), []], [NVIDIA_VK, [VULKAN]],
+  ]) {
+    const l = gpuLauncher(description, NVIDIA_D3D, failed);
+    const browsers = await Promise.all([l.pick(l.open), l.pick(l.open)]);
+    assert.deepEqual(browsers.map(b => b.backend), ['default', 'default']);
+    assert.deepEqual(l.opened, [VULKAN, 'default', 'default']);
+    assert.deepEqual(l.closed, failed.length ? [] : [VULKAN]);
+    assert.deepEqual(l.reads, failed.length ? [] : [VULKAN]);
+  }
+  for (const description of ['ANGLE (NVIDIA, an unknown Vulkan description, NVIDIA)', 'ANGLE (NVIDIA, Vulkan 1.4.351 ( ), NVIDIA)']) {
+    const l = gpuLauncher(description);
+    assert.equal((await l.pick(l.open)).backend, VULKAN);
+    assert.deepEqual(l.opened, [VULKAN], 'an unknown device keeps the existing hardware choice');
+  }
 });
