@@ -1,12 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fcpxmlDocument } from './fcpxml.mjs';
 import { nleRate } from './nle.mjs';
+import { filmHtml } from '../../src/film-doc.mjs';
+import { launch } from '../../src/host.mjs';
+import { createExports } from './exports.mjs';
+import { bringIn } from './files.mjs';
 
 const timeline = {
   name: 'Film <one> & "two"', rate: nleRate(29.97), width: 1920, height: 1080, durationFrames: 90,
@@ -174,6 +178,96 @@ test('invalid plans fail instead of silently attaching a connection to an unrela
   assert.throws(() => fcpxmlDocument({ ...timeline, video: [{ enabled: true, clips: [
     { ...picture, start: 0, end: 30 }, { ...picture, start: 20, end: 40 },
   ] }] }), /primary clips overlap at frame 20/);
+});
+
+test('Final Cut Pro export: linked-folder sources keep full media and distinct namesakes', {
+  skip: spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).status !== 0 && 'no ffmpeg', timeout: 120_000,
+}, async () => {
+  const scratch = mkdtempSync(join(tmpdir(), 'openfilm-fcpxml-export-'));
+  const previousHome = process.env.OPENFILM_HOME, previousExports = process.env.OPENFILM_EXPORTS;
+  process.env.OPENFILM_HOME = join(scratch, 'home');
+  process.env.OPENFILM_EXPORTS = join(scratch, 'exports');
+  try {
+    const cut = join(scratch, 'Film'), outside = join(scratch, '原始素材 & folder');
+    const nested = join(outside, '子目录'), imported = join(scratch, 'Imported'), name = '镜头 & one.mp4';
+    for (const dir of [cut, nested, imported]) mkdirSync(dir, { recursive: true });
+    const linkedSource = join(nested, name), localSource = join(imported, name);
+    for (const [file, seconds, color] of [[linkedSource, 4, 'red'], [localSource, 5, 'blue']]) {
+      execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=' + color + ':size=160x90:rate=25:duration=' + seconds,
+        '-f', 'lavfi', '-i', 'sine=frequency=330:duration=' + seconds, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', file]);
+    }
+    writeFileSync(join(outside, 'unused.mp4'), 'not used by the timeline');
+    const [folder] = await bringIn(cut, 'assets', [outside], 'link');
+    const [local] = await bringIn(cut, 'assets', [localSource], 'copy');
+    const source = folder + '/子目录/' + name;
+    writeFileSync(join(cut, 'film.html'), filmHtml({ stage: { w: 160, h: 90 }, tracks: [{ clips: [
+      { id: 'first', src: source, time: [1, 2], volume: 0.5 },
+      { id: 'again', src: source, at: 1, time: [2.4, 3], volume: 0.7 },
+      { id: 'namesake', src: local, at: 1.6, time: [0.2, 0.6], volume: 0.2 },
+    ] }] }));
+    const cases = [], exports = createExports();
+    for (const media of ['copy', 'link']) {
+      const job = exports.start({ id: 'film', name: 'Library ' + media, path: cut },
+        { kind: 'nle', format: 'fcpxml', media, fps: 25, subtitles: false });
+      let done;
+      do {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        done = exports.list('film').find((item) => item.id === job.id);
+      } while (!['done', 'failed', 'cancelled'].includes(done.status));
+      assert.equal(done.status, 'done', done.error);
+      cases.push({ media, done, xml: readFileSync(done.out, 'utf8') });
+    }
+    const browser = await launch();
+    let parsed;
+    try {
+      const page = await browser.newPage();
+      parsed = await page.evaluate((texts) => texts.map((text) => {
+        const doc = new DOMParser().parseFromString(text, 'application/xml');
+        const seconds = (value) => { const [n, d = '1'] = value.replace(/s$/, '').split('/'); return Number(n) / Number(d); };
+        const assets = new Map([...doc.querySelectorAll('resources > asset')].map((a) => [a.id, a]));
+        return {
+          error: doc.querySelector('parsererror')?.textContent ?? null,
+          library: [...doc.querySelectorAll('event > asset-clip')].map((c) => {
+            const file = c.getAttribute('ref'), asset = assets.get(file);
+            return { file, from: seconds(c.getAttribute('start')), duration: seconds(c.getAttribute('duration')),
+              video: asset.getAttribute('hasVideo'), audio: asset.getAttribute('hasAudio'), path: asset.querySelector('media-rep').getAttribute('src') };
+          }),
+          clips: [...doc.querySelectorAll('sequence video, sequence audio')].map((c) => ({
+            name: c.getAttribute('name'), file: c.getAttribute('ref'), from: seconds(c.getAttribute('start')),
+            duration: seconds(c.getAttribute('duration')), kind: c.tagName,
+          })),
+        };
+      }), cases.map((c) => c.xml));
+    } finally { await browser.close(); }
+    for (const [i, found] of parsed.entries()) {
+      assert.equal(found.error, null);
+      const { media, done } = cases[i];
+      assert.equal(found.library.length, 2, 'only used sources are in the event');
+      assert.equal(new Set(found.library.map((s) => s.file)).size, 2, 'same-named files stay separate');
+      assert.equal(found.clips.length, 6, 'three pictures with their original audio');
+      for (const [id, from, duration] of [['first', 1, 1], ['again', 2.4, 0.6], ['namesake', 0.2, 0.4]]) {
+        const clips = found.clips.filter((c) => c.name === id);
+        assert.deepEqual(clips.map((c) => c.kind).sort(), ['audio', 'video']);
+        for (const clip of clips) {
+          const entry = found.library.find((s) => s.file === clip.file);
+          assert.ok(entry, id + ': timeline and browser clip reference the same asset');
+          assert.deepEqual([clip.from, clip.duration], [from, duration]);
+          assert.deepEqual([entry.from, entry.video, entry.audio], [0, '1', '1']);
+          assert.equal(entry.duration, id === 'namesake' ? 5 : 4, 'the event clip keeps the full source duration');
+          const path = fileURLToPath(entry.path), original = id === 'namesake' ? localSource : linkedSource;
+          assert.ok(readFileSync(path).equals(readFileSync(original)), 'the media is the complete original file');
+          assert.equal(path, media === 'link' ? join(cut, id === 'namesake' ? local : source) : join(dirname(done.out), 'media', basename(path)));
+        }
+      }
+      assert.equal(found.clips.find((c) => c.name === 'first').file, found.clips.find((c) => c.name === 'again').file);
+      assert.notEqual(found.clips.find((c) => c.name === 'first').file, found.clips.find((c) => c.name === 'namesake').file);
+      assert.equal(done.outputs.filter((f) => f.endsWith('.mp4')).length, media === 'copy' ? 2 : 0);
+    }
+  } finally {
+    if (previousHome === undefined) delete process.env.OPENFILM_HOME; else process.env.OPENFILM_HOME = previousHome;
+    if (previousExports === undefined) delete process.env.OPENFILM_EXPORTS; else process.env.OPENFILM_EXPORTS = previousExports;
+    rmSync(scratch, { recursive: true, force: true });
+  }
 });
 
 const dtd = '/Applications/Final Cut Pro.app/Contents/Frameworks/Interchange.framework/Versions/A/Resources/FCPXMLv1_10.dtd';
