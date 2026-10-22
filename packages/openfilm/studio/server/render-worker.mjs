@@ -5,7 +5,7 @@
  * and Studio keeps serving.
  *
  * Told `{ args, opts }` once: one render, then it exits; says `progress`, then `done` (render's result) or `failed`;
- * `cancel` stops it.
+ * `cancel` stops it. A render whose browser crashed or stopped answering is drawn once more in a new one.
  *
  * Started with `--pool` (an editing project's pages): told `{ type: 'render', id, args, opts }` for each render, at
  * any time, `{ type: 'cancel', id }` to stop one and `{ type: 'close' }` when no more come; says `progress`, `done`
@@ -65,10 +65,19 @@ if (process.argv.includes('--pool')) {
     const abort = new AbortController();
     process.on('message', (/** @type {{ type?: string }} */ m) => { if (m?.type === 'cancel') abort.abort(); });
     try {
-      const result = await render(args, {
-        ...opts, signal: abort.signal,
-        onProgress: (/** @type {number} */ done, /** @type {number} */ total) => { process.send?.({ type: 'progress', done, total }); },
-      });
+      let result;
+      for (let tries = 1; ; tries++) {
+        try {
+          result = await render(args, {
+            ...opts, signal: abort.signal,
+            onProgress: (/** @type {number} */ done, /** @type {number} */ total) => { process.send?.({ type: 'progress', done, total }); },
+          });
+          break;
+        } catch (e) {
+          if (tries > 1 || abort.signal.aborted || !browserFailed(e)) throw e;
+          process.stderr.write(`openfilm: ${e instanceof Error ? e.message.split('\n')[0] : e}: drawn again in a new browser\n`);
+        }
+      }
       await say({ type: 'done', result });
       process.exit(0);
     } catch (e) {
