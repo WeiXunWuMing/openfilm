@@ -150,9 +150,9 @@ export function jianyingDraft(timeline, opts) {
     materialOf.set(key, id);
     return id;
   };
-  const speed = () => {
+  const speed = (value = 1) => {
     const id = hex();
-    materials.speeds.push({ curve_speed: null, id, mode: 0, speed: 1, type: 'speed' });
+    materials.speeds.push({ curve_speed: null, id, mode: 0, speed: value, type: 'speed' });
     return id;
   };
 
@@ -190,7 +190,7 @@ export function jianyingDraft(timeline, opts) {
           material_id: material(file, 'video'), target_timerange: span(c.start, c.end),
           source_timerange: file.video?.still ? { start: 0, duration: us(c.end) - us(c.start) } : span(c.in, c.out),
           visible: t.enabled && c.enabled, volume: level, last_nonzero_volume: level || 1,
-          extra_material_refs: [speed()], clip: clipSettings(scale, x, y), uniform_scale: { on: true, value: 1 },
+          speed: c.speed ?? 1, extra_material_refs: [speed(c.speed)], clip: clipSettings(scale, x, y), uniform_scale: { on: true, value: 1 },
           hdr_settings: { intensity: 1, mode: 1, nits: 1000 }, render_index: index,
         });
       }),

@@ -54,6 +54,8 @@ export function fcpxmlDocument(timeline, { cues = [] } = {}) {
   const { rate, width, height } = timeline;
   /** Exact rational seconds, including 1001-based rates, without decimal time drift. @param {number} frames @param {typeof rate} [r] */
   const time = (frames, r = rate) => `${frames * (r.ntsc ? 1001 : 1)}/${r.timebase * (r.ntsc ? 1000 : 1)}s`;
+  // Fractional retimed frames need integer rational seconds; nanoseconds fit FCP's 32-bit time denominator.
+  const retimedTime = (/** @type {number} */ frames, /** @type {number} */ speed) => `${Math.round(frames / rate.fps / speed * 1e9)}/1000000000s`;
   const decimal = (/** @type {number} */ n) => String(Math.round(n * 1e6) / 1e6);
   const decibels = (/** @type {number} */ gain) => `${decimal(20 * Math.log10(Math.max(0.000001, gain)))}dB`;
   const format = (/** @type {string} */ id, /** @type {number} */ w, /** @type {number} */ h, r = rate) =>
@@ -82,7 +84,16 @@ export function fcpxmlDocument(timeline, { cues = [] } = {}) {
     if (audioRole) attrs.push(`role="${attribute(audioRole)}"`);
     const lines = [`${pad}<${tag} ${attrs.join(' ')}>`];
     if (kind === 'video') {
-      lines.push(`${pad}  <video ref="${clip.fileId}" name="${attribute(clip.name)}" offset="${time(clip.in)}" start="${time(clip.in)}" duration="${time(clip.end - clip.start)}">`);
+      const start = clip.speed ? retimedTime(clip.in, clip.speed) : time(clip.in);
+      lines.push(`${pad}  <video ref="${clip.fileId}" name="${attribute(clip.name)}" offset="${time(clip.in)}" start="${start}" duration="${time(clip.end - clip.start)}">`);
+      if (clip.speed) {
+        const file = timeline.files.find(f => f.id === clip.fileId);
+        if (!file) throw new Error(`clip ${clip.id} points at a missing file ${clip.fileId}`);
+        lines.push(`${pad}    <timeMap preservesPitch="1">`,
+          `${pad}      <timept time="0s" value="0s" interp="linear"/>`,
+          `${pad}      <timept time="${retimedTime(file.durationFrames, clip.speed)}" value="${time(file.durationFrames)}" interp="linear"/>`,
+          `${pad}    </timeMap>`);
+      }
       // Disable automatic fitting: the planner's scale is relative to the source's own pixels.
       lines.push(`${pad}  <adjust-conform type="none"/>`);
       if (clip.motion) {
@@ -90,8 +101,8 @@ export function fcpxmlDocument(timeline, { cues = [] } = {}) {
         const position = `${decimal(center.h * width / height * 100)} ${decimal(-center.v * 100)}`;
         lines.push(`${pad}  <adjust-transform position="${position}" scale="${decimal(scale / 100)} ${decimal(scale / 100)}"/>`);
       }
-      // FCP keeps footage audio connected when it is nested inside the video component.
-      lines.push(...audio, `${pad}  </video>`);
+      // Processed audio already has the requested speed: a sibling avoids retiming it again with its video.
+      lines.push(...(clip.speed ? [] : audio), `${pad}  </video>`, ...(clip.speed ? audio : []));
     } else if (clip.levels?.length) {
       lines.push(`${pad}  <adjust-volume>`, `${pad}    <param name="amount">`, `${pad}      <keyframeAnimation>`);
       for (const key of clip.levels) {

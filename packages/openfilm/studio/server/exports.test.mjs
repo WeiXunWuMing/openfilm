@@ -842,7 +842,7 @@ test('editing software: an xmeml folder; pages rendered with alpha, footage plac
   const folder = join(exportsRoot(), 'Cut · Editor XML');
   /* the outputs are this system's paths: Windows separates them with \ */
   const rel = done.outputs.map((f) => f.slice(folder.length + 1).replaceAll('\\', '/'));
-  assert.deepEqual(rel, ['Cut.xml', 'Cut.srt', 'media/badge.png', 'media/bed x2.wav', 'media/shot one x0.5.wav', 'media/shot one.mp4', 'media/slow.mov',
+  assert.deepEqual(rel, ['Cut.xml', 'Cut.srt', 'media/badge.png', 'media/bed x2.wav', 'media/shot one x0.5.wav', 'media/shot one.mp4',
     'media/title-2.mov', 'media/title.mov', 'media/voice.wav']);
   assert.equal(done.out, join(folder, 'Cut.xml'));
   assert.equal(probe(join(folder, 'media', 'title.mov'), 'stream=codec_name,pix_fmt').split(',')[0], 'prores', 'ProRes 4444 for the other editors');
@@ -862,6 +862,7 @@ test('editing software: an xmeml folder; pages rendered with alpha, footage plac
     const clips = (kind) => [...doc.querySelectorAll(`sequence > media > ${kind} > track`)].map((track) => [...track.querySelectorAll(':scope > clipitem')].map((c) => ({
       name: text(c, ':scope > name'), enabled: text(c, ':scope > enabled'), start: Number(text(c, ':scope > start')), end: Number(text(c, ':scope > end')),
       in: Number(text(c, ':scope > in')), out: Number(text(c, ':scope > out')),
+      sourceOut: text(c, ':scope > pproTicksOut') === null ? null : Number(text(c, ':scope > pproTicksOut')) / 254016000000 * 25,
       effects: [...c.querySelectorAll(':scope > filter effectid')].map((e) => e.textContent), links: c.querySelectorAll(':scope > link').length,
       path: text(c, ':scope > file > pathurl'), file: c.querySelector(':scope > file')?.getAttribute('id'),
     })));
@@ -870,9 +871,10 @@ test('editing software: an xmeml folder; pages rendered with alpha, footage plac
   assert.equal(error, null);
   assert.equal(found.timebase, '25');
   /* V1 is film.html's last picture track: the footage, at its trim, scaled up from 160 × 90, linked to its sound; the
-     part at half speed rendered */
+     part at half speed retaining the full recording, with its sound rendered to preserve pitch */
   const [[shot, slow], [hidden], [badge], [title]] = found.video;
-  assert.deepEqual([slow.name, slow.start, slow.end, slow.in, slow.out, slow.effects], ['slow', 40, 60, 0, 20, []]);
+  assert.deepEqual([slow.name, slow.start, slow.end, slow.in, slow.out, slow.effects], ['slow', 40, 60, 50, 70, ['basic', 'timeremap']]);
+  assert.equal(slow.file, shot.file);
   assert.deepEqual([shot.name, shot.start, shot.end, shot.in, shot.out, shot.links], ['shot', 0, 40, 10, 50, 2]);
   assert.deepEqual(shot.effects, ['basic']);
   assert.match(shot.path, /media\/shot%20one\.mp4$/);
@@ -890,7 +892,7 @@ test('editing software: an xmeml folder; pages rendered with alpha, footage plac
     const media = paths.get(c.file);
     if (/\.png$/.test(media)) continue;
     const frames = Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', media]).toString()) * 25;
-    assert.ok(c.out <= frames + 1, `${c.name}: its media has ${frames} frames, the clip plays to ${c.out}`);
+    assert.ok((c.sourceOut ?? c.out) <= frames + 1, `${c.name}: its media has ${frames} frames, the clip plays to ${c.sourceOut ?? c.out}`);
     if (/ x[\d.]+\.wav$|\.mov$/.test(media)) assert.ok(Math.abs(frames - (c.end - c.start)) < 0.5 && c.in === 0, `${c.name}: ${frames} frames of media for ${c.end - c.start} on the timeline`);
   }
   /* sound to its end, not silence padded after half of it */
@@ -901,7 +903,7 @@ test('editing software: an xmeml folder; pages rendered with alpha, footage plac
   const stems = await exported({ kind: 'nle', fps: 25, audio: 'stems', media: 'link', subtitles: false }, 'Cut', cut);
   const folder2 = join(exportsRoot(), 'Cut · Editor XML 2');
   assert.deepEqual(stems.outputs.map((f) => f.slice(folder2.length + 1).replaceAll('\\', '/')),
-    ['Cut.xml', 'media/Cut - footage.wav', 'media/Cut - voice.wav', 'media/badge.png', 'media/slow.mov', 'media/title-2.mov', 'media/title.mov']);
+    ['Cut.xml', 'media/Cut - footage.wav', 'media/Cut - voice.wav', 'media/badge.png', 'media/title-2.mov', 'media/title.mov']);
   const xml = readFileSync(stems.out, 'utf8');
   assert.match(xml, /<pathurl>file:\/\/localhost\/[^<]*\/Cut\/footage\/shot%20one\.mp4<\/pathurl>/, 'linked to the footage where it is');
   assert.ok(!xml.includes('<link>'), 'a stem is not linked to a picture');
