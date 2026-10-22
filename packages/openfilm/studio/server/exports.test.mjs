@@ -101,7 +101,7 @@ function zipEntries(file) {
 }
 /** Each text parsed as XML by Chromium: null when well formed, else what is wrong; and `query(text)` run on each document. */
 async function parseXml(texts, query = () => null) {
-  const browser = await launch({ args: ['--use-angle=swiftshader'] });
+  const browser = await launch();
   try {
     const page = await browser.newPage();
     return await page.evaluate(([list, fn]) => list.map((text) => {
