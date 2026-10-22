@@ -58,7 +58,7 @@ test('FCPXML keeps exact NTSC times, source trims, layering, transforms and sepa
   assert.match(xml, /lane="0" offset="15015\/30000s" start="30030\/30000s" duration="45045\/30000s" enabled="1"/);
   assert.match(xml, /name="overlay" lane="1"/);
   assert.match(xml, /<video ref="file-1" name="footage" offset="30030\/30000s" start="30030\/30000s" duration="45045\/30000s">/);
-  assert.doesNotMatch(xml, /<asset-clip |srcEnable=/);
+  assert.doesNotMatch(xml.slice(xml.indexOf('<sequence ')), /<asset-clip |srcEnable=/);
   assert.match(xml, /<adjust-conform type="none"\/>/);
   assert.match(xml, /position="44.444444 25" scale="2 2"/);
   assert.match(xml, /<audio ref="file-1" name="sound" lane="-1"/);
@@ -67,6 +67,21 @@ test('FCPXML keeps exact NTSC times, source trims, layering, transforms and sepa
   assert.match(xml, /<keyframe time="0\/30000s" value="-120dB"/);
   assert.doesNotMatch(xml, /<keyframe[^>]*(?:interp|curve)=/, 'FCP audio volume parameters do not accept interpolation attributes');
   assert.doesNotMatch(xml, /Infinity|NaN|undefined/);
+});
+
+test('FCPXML registers full-length browser clips using the same assets as the timeline', () => {
+  const xml = fcpxmlDocument(timeline);
+  const browser = xml.slice(xml.indexOf('<event '), xml.indexOf('<project '));
+  assert.equal((browser.match(/<asset-clip /g) ?? []).length, timeline.files.length);
+  for (const file of timeline.files) {
+    const clips = [...browser.matchAll(new RegExp(`<asset-clip ref="${file.id}"[^>]*`, 'g'))];
+    assert.equal(clips.length, 1, `${file.name}: one browser entry per source`);
+    assert.ok(clips[0][0].includes(`start="0s" duration="${file.durationFrames * 1001}/30000s"`), 'the browser keeps the whole source');
+    assert.equal(clips[0][0].includes(`format="format-${file.id}"`), Boolean(file.video));
+    const sequence = xml.slice(xml.indexOf('<sequence '));
+    assert.ok(sequence.includes(`ref="${file.id}"`), 'timeline and browser share the asset');
+  }
+  assert.match(browser, /name="shot &amp; one.mov"/);
 });
 
 test('only real empty intervals become primary gaps, with overlays anchored in source time', () => {

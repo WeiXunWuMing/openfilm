@@ -9,6 +9,7 @@ import { createExports, diskFull, exportCapabilities, exportsRoot, ExportError, 
 import { encoders, hardwareEncoder } from '../../src/encoders.mjs';
 import { allocateLanes, containMotion, fadeKeyframes, frameSpan, nleRate, planNleTimeline, xmemlDocument } from './nle.mjs';
 import { fcpxmlDocument } from './fcpxml.mjs';
+import { bringIn } from './files.mjs';
 import { pptxParts } from './slides.mjs';
 import { filmSubtitleSrt, parseFilmSubtitleStyle } from './film-subtitle.mjs';
 import { zipFiles } from './zip.mjs';
@@ -100,7 +101,7 @@ function zipEntries(file) {
 }
 /** Each text parsed as XML by Chromium: null when well formed, else what is wrong; and `query(text)` run on each document. */
 async function parseXml(texts, query = () => null) {
-  const browser = await launch();
+  const browser = await launch({ args: ['--use-angle=swiftshader'] });
   try {
     const page = await browser.newPage();
     return await page.evaluate(([list, fn]) => list.map((text) => {
@@ -551,6 +552,172 @@ test('fades in the editor\'s timeline: a picture that fades is rendered; a sound
   assert.match(xmemlDocument(timeline), /<parameterid>level<\/parameterid>[\s\S]*<keyframe>\s*<when>0<\/when>\s*<value>0<\/value>\s*<\/keyframe>\s*<keyframe>\s*<when>13<\/when>/);
 });
 
+test('Premiere/Resolve XML: reused timeline clips share full-length source clips in the media bin', async () => {
+  const facts = { w: 320, h: 180, duration: 20, hasVideo: true, hasAudio: true, channels: 2, sampleRate: 48000 };
+  const shot = { kind: 'video', src: 'first/source & one.mp4', path: join(scratch, 'first', 'source & one.mp4'),
+    speed: 1, track: 0, hidden: false, facts };
+  const pictures = [
+    { ...shot, id: 'first', at: 0, end: 3, from: 2 },
+    { ...shot, id: 'again', at: 4, end: 6, from: 10, track: 1, hidden: true },
+    { ...shot, id: 'different', src: 'second/source & one.mp4', path: join(scratch, 'second', 'source & one.mp4'), at: 6, end: 8, from: 0 },
+    { id: 'page', kind: 'page', src: 'page.html', path: join(scratch, 'page.html'), at: 0, end: 1, from: 0, speed: 1, track: 2, hidden: false, facts: null },
+    { id: 'still', kind: 'still', src: 'still.png', path: join(scratch, 'still.png'), at: 2, end: 4, from: 0, speed: 1, track: 2, hidden: false, facts: { w: 320, h: 180 } },
+  ];
+  const voice = { src: 'voice.wav', path: join(scratch, 'voice.wav'), speed: 1, volume: 1, enabled: true, role: 'voice',
+    facts: { duration: 20, hasAudio: true, channels: 1, sampleRate: 44100 } };
+  const sounds = [
+    ...pictures.filter((p) => p.kind === 'video').map((p) => ({ ...p, picture: p.id, to: p.from + p.end - p.at,
+      volume: 0.5, enabled: !p.hidden, role: 'footage' })),
+    { ...voice, id: 'voice', at: 0, from: 2, to: 4 }, { ...voice, id: 'voice-again', at: 4, from: 8, to: 10 },
+  ];
+  const film = { stage: { w: 320, h: 180 }, duration: 8, pictures, sounds };
+  const opts = { title: 'Cut & <share>', fps: 25, audio: 'clips', media: 'copy', mediaDir: join(scratch, 'export', 'media') };
+  const plans = [planNleTimeline(film, opts), planNleTimeline(film, { ...opts, media: 'link' }),
+    planNleTimeline({ ...film, pictures: [], sounds: sounds.filter((s) => s.role === 'voice') }, opts),
+    planNleTimeline(film, { ...opts, audio: 'stems', stems: ['footage', 'voice'] })];
+  const parsed = await parseXml(plans.map((plan) => xmemlDocument(plan)), (doc) => {
+    const text = (el, sel) => el.querySelector(sel)?.textContent ?? null;
+    const component = (c) => ({ id: c.getAttribute('id'), master: text(c, ':scope > masterclipid'),
+      file: c.querySelector(':scope > file')?.getAttribute('id'), name: text(c, ':scope > name'), enabled: text(c, ':scope > enabled'),
+      start: Number(text(c, ':scope > start')), end: Number(text(c, ':scope > end')),
+      in: Number(text(c, ':scope > in')), out: Number(text(c, ':scope > out')), effects: c.querySelectorAll(':scope > filter').length });
+    return {
+      name: text(doc, 'xmeml > project > name'), bin: text(doc, 'project > children > bin > name'),
+      masters: [...doc.querySelectorAll('project > children > bin > children > clip')].map((c) => ({
+        id: c.getAttribute('id'), master: text(c, ':scope > masterclipid'), isMaster: text(c, ':scope > ismasterclip'),
+        name: text(c, ':scope > name'), duration: Number(text(c, ':scope > duration')),
+        components: [...c.querySelectorAll(':scope > media > video > track > clipitem, :scope > media > audio > track > clipitem')].map(component),
+      })),
+      clips: [...doc.querySelectorAll('sequence > media > video > track > clipitem, sequence > media > audio > track > clipitem')].map(component),
+      files: [...doc.querySelectorAll('file > pathurl')].map((p) => ({ id: p.parentElement.getAttribute('id'), path: p.textContent })),
+      ids: [...doc.querySelectorAll('clip[id], clipitem[id]')].map((c) => c.getAttribute('id')),
+    };
+  });
+  for (const [i, { error, found }] of parsed.entries()) {
+    assert.equal(error, null);
+    const plan = plans[i];
+    assert.equal(found.name, opts.title);
+    assert.equal(found.bin, 'Media');
+    assert.equal(found.masters.length, plan.files.length, 'one source clip per file, including rendered media and stems');
+    assert.equal(new Set(found.ids).size, found.ids.length, 'master and timeline component IDs are distinct');
+    assert.equal(found.files.length, plan.files.length, 'each file is defined once');
+    for (const file of plan.files) {
+      const source = found.masters.find((m) => m.components.some((c) => c.file === file.id));
+      assert.ok(source, `${file.name} is in the media bin`);
+      assert.deepEqual([source.master, source.isMaster, source.name, source.duration], [source.id, 'TRUE', file.name, file.durationFrames]);
+      assert.equal(source.components.length, Number(Boolean(file.video)) + Number(Boolean(file.audio)), 'source clip keeps its picture and sound');
+      for (const c of source.components) {
+        assert.deepEqual([c.master, c.file, c.in, c.out, c.enabled, c.effects], [source.id, file.id, 0, file.durationFrames, 'TRUE', 0]);
+      }
+      const path = found.files.find((f) => f.id === file.id)?.path;
+      assert.ok(path);
+      assert.equal(fileURLToPath(path.replace(/^file:\/\/localhost\//, 'file:///')), file.path);
+      const clips = plan.video.concat(plan.audio).flatMap((t) => t.clips).filter((c) => c.fileId === file.id);
+      const linked = found.clips.filter((c) => c.master === source.id);
+      assert.equal(linked.length, clips.length, 'all uses of a source share its master clip');
+      for (const c of clips) {
+        const actual = linked.find((s) => s.id === c.id);
+        assert.ok(actual);
+        assert.deepEqual([actual.file, actual.start, actual.end, actual.in, actual.out, actual.enabled],
+          [file.id, c.start, c.end, c.in, c.out, c.enabled ? 'TRUE' : 'FALSE']);
+      }
+    }
+    assert.equal(found.clips.length, plan.video.concat(plan.audio).reduce((n, t) => n + t.clips.length, 0));
+  }
+});
+
+test('editing projects: linked-folder footage shares full-length library sources without merging namesakes', { ...ffmpeg, timeout: 240_000 }, async (t) => {
+  const cut = join(scratch, 'Linked library');
+  const outside = join(scratch, '原始素材 & folder');
+  const nested = join(outside, '子目录');
+  const imported = join(scratch, 'Imported');
+  const name = '镜头 & one.mp4';
+  for (const dir of [cut, nested, imported]) mkdirSync(dir, { recursive: true });
+  const linkedSource = join(nested, name), localSource = join(imported, name);
+  for (const [file, seconds, color] of [[linkedSource, 4, 'red'], [localSource, 5, 'blue']]) {
+    execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', `color=${color}:size=160x90:rate=25:duration=${seconds}`,
+      '-f', 'lavfi', '-i', `sine=frequency=330:duration=${seconds}`, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', file]);
+  }
+  writeFileSync(join(outside, 'unused.mp4'), 'not used by the timeline');
+  const previousHome = process.env.OPENFILM_HOME;
+  process.env.OPENFILM_HOME = join(scratch, 'linked-library-home');
+  try {
+    const [folder] = await bringIn(cut, 'assets', [outside], 'link');
+    const [local] = await bringIn(cut, 'assets', [localSource], 'copy');
+    const source = `${folder}/子目录/${name}`;
+    writeFileSync(join(cut, 'film.html'), filmHtml({ stage: { w: 160, h: 90 }, tracks: [{ clips: [
+      { id: 'first', src: source, time: [1, 2], volume: 0.5 },
+      { id: 'again', src: source, at: 1, time: [2.4, 3], volume: 0.7 },
+      { id: 'namesake', src: local, at: 1.6, time: [0.2, 0.6], volume: 0.2 },
+    ] }] }));
+    const cases = [];
+    for (const format of ['xml', 'fcpxml']) for (const media of ['copy', 'link']) {
+      const done = await exported({ kind: 'nle', format, media, fps: 25, subtitles: false }, `Library ${format} ${media}`, cut);
+      cases.push({ format, media, done, xml: readFileSync(done.out, 'utf8') });
+    }
+    const parsed = await parseXml(cases.map((c) => c.xml), (doc) => {
+      const seconds = (value) => { const [n, d = '1'] = value.replace(/s$/, '').split('/'); return Number(n) / Number(d); };
+      if (doc.documentElement.tagName === 'fcpxml') {
+        const assets = new Map([...doc.querySelectorAll('resources > asset')].map((a) => [a.id, a]));
+        return {
+          library: [...doc.querySelectorAll('event > asset-clip')].map((c) => {
+            const file = c.getAttribute('ref'), asset = assets.get(file);
+            return { key: file, file, from: seconds(c.getAttribute('start')), duration: seconds(c.getAttribute('duration')),
+              video: asset.getAttribute('hasVideo'), audio: asset.getAttribute('hasAudio'), path: asset.querySelector('media-rep').getAttribute('src') };
+          }),
+          clips: [...doc.querySelectorAll('sequence video, sequence audio')].map((c) => ({
+            name: c.getAttribute('name'), key: c.getAttribute('ref'), file: c.getAttribute('ref'), from: seconds(c.getAttribute('start')),
+            duration: seconds(c.getAttribute('duration')), kind: c.tagName,
+          })),
+        };
+      }
+      const text = (el, sel) => el.querySelector(sel)?.textContent;
+      const files = new Map([...doc.querySelectorAll('file > pathurl')].map((p) => [p.parentElement.id, p.textContent]));
+      return {
+        library: [...doc.querySelectorAll('bin > children > clip')].map((c) => {
+          const file = c.querySelector('file').id;
+          return { key: c.id, file, from: Number(text(c, ':scope > in')) / 25, duration: Number(text(c, ':scope > duration')) / 25,
+            video: c.querySelector('media > video') ? '1' : null, audio: c.querySelector('media > audio') ? '1' : null, path: files.get(file) };
+        }),
+        clips: [...doc.querySelectorAll('sequence clipitem')].map((c) => ({
+          name: text(c, ':scope > name'), key: text(c, ':scope > masterclipid'), file: c.querySelector('file').id,
+          from: Number(text(c, ':scope > in')) / 25, duration: (Number(text(c, ':scope > out')) - Number(text(c, ':scope > in'))) / 25,
+          kind: c.parentElement.parentElement.tagName,
+        })),
+      };
+    });
+    for (const [i, { error, found }] of parsed.entries()) {
+      assert.equal(error, null);
+      const { media, done } = cases[i];
+      assert.equal(found.library.length, 2, 'only used sources are in the library; same-named files stay separate');
+      assert.equal(new Set(found.library.map((s) => s.file)).size, 2);
+      assert.equal(found.clips.length, 6, 'three pictures with their three original audio clips');
+      for (const [id, from, duration] of [['first', 1, 1], ['again', 2.4, 0.6], ['namesake', 0.2, 0.4]]) {
+        const clips = found.clips.filter((c) => c.name === id);
+        assert.deepEqual(clips.map((c) => c.kind).sort(), ['audio', 'video']);
+        for (const clip of clips) {
+          const entry = found.library.find((s) => s.key === clip.key);
+          assert.ok(entry, `${id}: timeline refers to a library source`);
+          assert.equal(entry.file, clip.file);
+          assert.deepEqual([clip.from, clip.duration], [from, duration]);
+          assert.deepEqual([entry.from, entry.video, entry.audio], [0, '1', '1']);
+          const original = id === 'namesake' ? localSource : linkedSource;
+          assert.equal(entry.duration, id === 'namesake' ? 5 : 4, 'the library keeps the full source duration');
+          const path = fileURLToPath(entry.path.replace(/^file:\/\/localhost\//, 'file:///'));
+          assert.ok(readFileSync(path).equals(readFileSync(original)), 'the media is the complete original file');
+          assert.equal(path, media === 'link' ? join(cut, id === 'namesake' ? local : source) : join(dirname(done.out), 'media', basename(path)));
+        }
+      }
+      assert.equal(found.clips.find((c) => c.name === 'first').key, found.clips.find((c) => c.name === 'again').key);
+      assert.notEqual(found.clips.find((c) => c.name === 'first').key, found.clips.find((c) => c.name === 'namesake').key);
+      assert.equal(done.outputs.filter((f) => f.endsWith('.mp4')).length, media === 'copy' ? 2 : 0);
+    }
+    t.diagnostic(`Local import fixtures: ${dirname(cases[0].done.out)}; ${dirname(cases[2].done.out)}`);
+  } finally {
+    if (previousHome === undefined) delete process.env.OPENFILM_HOME; else process.env.OPENFILM_HOME = previousHome;
+  }
+});
+
 test('Final Cut Pro keeps source audio rows when an effect overlaps adjacent narration clips', () => {
   const facts = { duration: 120, hasAudio: true, channels: 2, sampleRate: 48000 };
   const sound = (id, track, at, to) => ({ id, track, at, from: 0, to, speed: 1, volume: 1, enabled: true,
@@ -608,7 +775,7 @@ test('Final Cut Pro footage audio follows its own picture, including reused sour
     }));
     const overlay = doc.querySelector('clip[name="overlay"]');
     overlay.setAttribute('offset', `${seconds(overlay.getAttribute('offset')) + 1}s`);
-    return { clips, moved: overlay.querySelector('audio') ? at(overlay.querySelector('audio')) : null, ambiguous: doc.querySelectorAll('asset-clip').length };
+    return { clips, moved: overlay.querySelector('audio') ? at(overlay.querySelector('audio')) : null, ambiguous: doc.querySelectorAll('sequence asset-clip').length };
   });
   for (const [i, { error, found }] of parsed.entries()) {
     assert.equal(error, null);
@@ -842,11 +1009,12 @@ test('editing software: an xmeml folder; pages rendered with alpha, footage plac
 
   const [{ error, found }] = await parseXml([readFileSync(done.out, 'utf8')], (doc) => {
     const text = (el, sel) => el.querySelector(sel)?.textContent ?? null;
+    const files = new Map([...doc.querySelectorAll('file > pathurl')].map((p) => [p.parentElement.getAttribute('id'), p.textContent]));
     const clips = (kind) => [...doc.querySelectorAll(`sequence > media > ${kind} > track`)].map((track) => [...track.querySelectorAll(':scope > clipitem')].map((c) => ({
       name: text(c, ':scope > name'), enabled: text(c, ':scope > enabled'), start: Number(text(c, ':scope > start')), end: Number(text(c, ':scope > end')),
       in: Number(text(c, ':scope > in')), out: Number(text(c, ':scope > out')),
       effects: [...c.querySelectorAll(':scope > filter effectid')].map((e) => e.textContent), links: c.querySelectorAll(':scope > link').length,
-      path: text(c, ':scope > file > pathurl'), file: c.querySelector(':scope > file')?.getAttribute('id'),
+      path: files.get(c.querySelector(':scope > file')?.getAttribute('id')), file: c.querySelector(':scope > file')?.getAttribute('id'),
     })));
     return { timebase: text(doc, 'sequence > rate > timebase'), video: clips('video'), audio: clips('audio') };
   });

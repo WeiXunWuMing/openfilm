@@ -18,6 +18,7 @@
  *   · Sound comes as clips (each its own, with its level, footage's sound linked to its picture) on footage, voice,
  *     sound-effect and music tracks, or as those four mixed stems. FCPXML clips instead retain their source rows.
  *   · A hidden track's clips and a muted track's sounds are not dropped: they come disabled, one click from back on.
+ *   · XML's Media bin has one full-length master clip per file; timeline clips share that master, including its sound.
  *   · Fades (film.html `overrides`' `fade`): a picture that fades is rendered, its fades in its alpha; a sound that
  *     fades comes as a WAV of its own part, from its first frame, with Audio Levels keyframes for its ramps (counted
  *     from the file's start, which is the clip's, so editors that count keyframes from either agree).
@@ -452,9 +453,8 @@ const motionXml = (m, pad) => [
 ].join('\n');
 
 /**
- * The timeline as an xmeml v4 document. A file is written whole the first time a clip uses it and referred to after
- * (one source used three times is one source in the editor, not three); links name the other clip's track and place
- * (both from 1), so all clips are placed before any is written.
+ * The timeline as an xmeml v4 project, with its files in a Media bin as master clips. Each file is defined once in
+ * its master and referred to after; links name the other timeline clip's track and place (both from 1).
  * @param {NleTimeline} timeline
  */
 export function xmemlDocument(timeline) {
@@ -474,6 +474,7 @@ export function xmemlDocument(timeline) {
     if (!file) throw new Error(`clip ${clip.id} points at a missing file ${clip.fileId}`);
     const lines = [
       `${pad}<clipitem id="${xmlEscape(clip.id)}">`, `${pad}  <name>${xmlEscape(clip.name)}</name>`,
+      `${pad}  <masterclipid>masterclip-${xmlEscape(file.id)}</masterclipid>`,
       `${pad}  <enabled>${bool(clip.enabled)}</enabled>`, `${pad}  <duration>${file.durationFrames}</duration>`,
       rateXml(rate, `${pad}  `),
       `${pad}  <start>${clip.start}</start>`, `${pad}  <end>${clip.end}</end>`, `${pad}  <in>${clip.in}</in>`, `${pad}  <out>${clip.out}</out>`,
@@ -505,20 +506,40 @@ export function xmemlDocument(timeline) {
     `${pad}  <enabled>${bool(track.enabled)}</enabled>`, `${pad}  <locked>FALSE</locked>`, `${pad}</track>`,
   ].join('\n');
 
-  const p = '        ';
+  const mediaTypes = /** @type {('video' | 'audio')[]} */ (['video', 'audio']);
+  const masters = timeline.files.map((file) => {
+    const id = `masterclip-${file.id}`, pad = '          ';
+    return [
+      `${pad}<clip id="${xmlEscape(id)}">`, `${pad}  <name>${xmlEscape(file.name)}</name>`,
+      `${pad}  <masterclipid>${xmlEscape(id)}</masterclipid>`, `${pad}  <ismasterclip>TRUE</ismasterclip>`,
+      `${pad}  <duration>${file.durationFrames}</duration>`, rateXml(rate, `${pad}  `),
+      `${pad}  <in>0</in>`, `${pad}  <out>${file.durationFrames}</out>`, `${pad}  <media>`,
+      ...mediaTypes.flatMap((media) => file[media] ? [
+        `${pad}    <${media}>`, `${pad}      <track>`,
+        clipXml({ id: `${id}-${media}`, name: file.name, fileId: file.id,
+          start: 0, end: file.durationFrames, in: 0, out: file.durationFrames, enabled: true }, media, `${pad}        `),
+        `${pad}      </track>`, `${pad}    </${media}>`,
+      ] : []),
+      `${pad}  </media>`, `${pad}</clip>`,
+    ].join('\n');
+  });
+  const p = '            ';
   return [
-    '<?xml version="1.0" encoding="UTF-8"?>', '<!DOCTYPE xmeml>', '<xmeml version="4">', '  <sequence id="sequence-1">',
-    `    <name>${xmlEscape(timeline.name)}</name>`, `    <duration>${timeline.durationFrames}</duration>`,
-    rateXml(rate, '    '), timecodeXml(rate, '    '), '    <in>-1</in>', '    <out>-1</out>', '    <media>', '      <video>',
+    '<?xml version="1.0" encoding="UTF-8"?>', '<!DOCTYPE xmeml>', '<xmeml version="4">',
+    '  <project>', `    <name>${xmlEscape(timeline.name)}</name>`, '    <children>',
+    '      <bin>', '        <name>Media</name>', '        <children>', ...masters, '        </children>', '      </bin>',
+    '      <sequence id="sequence-1">',
+    `        <name>${xmlEscape(timeline.name)}</name>`, `        <duration>${timeline.durationFrames}</duration>`,
+    rateXml(rate, '        '), timecodeXml(rate, '        '), '        <in>-1</in>', '        <out>-1</out>', '        <media>', '          <video>',
     `${p}<format>`, `${p}  <samplecharacteristics>`, rateXml(rate, `${p}    `),
     `${p}    <width>${timeline.width}</width>`, `${p}    <height>${timeline.height}</height>`,
     `${p}    <anamorphic>FALSE</anamorphic>`, `${p}    <pixelaspectratio>square</pixelaspectratio>`, `${p}    <fielddominance>none</fielddominance>`,
     `${p}  </samplecharacteristics>`, `${p}</format>`,
     ...timeline.video.map((t) => trackXml(t, 'video', p)),
-    '      </video>', '      <audio>', `${p}<numOutputChannels>2</numOutputChannels>`,
+    '          </video>', '          <audio>', `${p}<numOutputChannels>2</numOutputChannels>`,
     `${p}<format>`, `${p}  <samplecharacteristics>`, `${p}    <depth>16</depth>`, `${p}    <samplerate>48000</samplerate>`, `${p}  </samplecharacteristics>`, `${p}</format>`,
     ...timeline.audio.map((t) => trackXml(t, 'audio', p)),
-    '      </audio>', '    </media>', '  </sequence>', '</xmeml>', '',
+    '          </audio>', '        </media>', '      </sequence>', '    </children>', '  </project>', '</xmeml>', '',
   ].join('\n');
 }
 

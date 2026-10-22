@@ -46,7 +46,7 @@ function connectionAt(primary, frame) {
 
 /**
  * FCPXML 1.10 adapter for the shared NLE plan. Media is prepared by exports.mjs;
- * HTML pages arrive as rendered ProRes clips. FCP roles and connection times belong here.
+ * HTML pages arrive as rendered ProRes clips. Each file is also a full-length browser clip in the event.
  * @param {import('./nle.mjs').NleTimeline} timeline
  * @param {{ cues?: readonly import('./film-subtitle.mjs').FilmSubtitleCue[] }} [subtitles]
  */
@@ -176,6 +176,8 @@ export function fcpxmlDocument(timeline, { cues = [] } = {}) {
   return [
     '<?xml version="1.0" encoding="UTF-8"?>', '<!DOCTYPE fcpxml>', '<fcpxml version="1.10">', '  <resources>',
     ...resources, '  </resources>', '  <library>', `    <event name="${attribute(timeline.name)}">`,
+    ...timeline.files.map((file) => `      <asset-clip ref="${file.id}" name="${attribute(file.name)}" start="0s" duration="${time(file.durationFrames)}"`
+      + (file.video ? ` format="format-${file.id}"` : '') + '/>'),
     `      <project name="${attribute(timeline.name)}">`,
     `        <sequence format="sequence-format" duration="${time(timeline.durationFrames)}" tcStart="0s" tcFormat="NDF" audioLayout="stereo" audioRate="48k">`,
     '          <spine>', ...spine, '          </spine>', '        </sequence>', '      </project>',
