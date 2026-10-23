@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fadeGain, filmHtml } from '../../src/film-doc.mjs';
 import { createExports } from './exports.mjs';
-import { planNleTimeline, xmemlDocument } from './nle.mjs';
+import { fadeKeyframes, nleRate, planNleTimeline, xmemlDocument } from './nle.mjs';
 
 const facts = { w: 160, h: 90, duration: 12, fps: 25, hasVideo: true, hasAudio: true, channels: 1, sampleRate: 48000 };
 const picture = { id: 'faded', kind: 'video', src: 'Camera Original.mp4', path: '/p/Camera Original.mp4',
@@ -54,6 +54,26 @@ test('unrepresented effects and other formats keep their render fallback; retime
   assert.equal(file.job.kind, 'transcode');
   assert.equal(file.job.segment.speed, 2);
   assert.equal(audio.in, 0);
+});
+
+test('a sub-frame fade-in keeps the first picture and sound frame at zero without extending the cut', () => {
+  const fade = [1 / 60, 0];
+  for (const fps of [24, 25, 29.97]) {
+    const timeline = plan({ fps }, { ...picture, fade }, { ...sound, fade });
+    const video = timeline.video[0].clips[0], audio = timeline.audio[0].clips[0];
+    assert.deepEqual(video.opacity, [{ when: 0, value: 0 }, { when: 1, value: 100 }]);
+    assert.deepEqual(audio.levels, [{ when: 0, value: 0 }, { when: 1, value: 0.5 }]);
+    assert.equal(video.in, audio.in);
+    assert.equal(video.end - video.start, video.out - video.in);
+    assert.equal(video.end, audio.end);
+    assert.equal(timeline.files.length, 1);
+    assert.equal(timeline.files[0].job.kind, 'copy');
+    const rate = nleRate(fps);
+    assert.deepEqual(fadeKeyframes([0, 0], 1, 1, rate), [{ when: 0, value: 1 }]);
+    assert.deepEqual(fadeKeyframes(fade, 1, 1, rate), [{ when: 0, value: 0 }, { when: 1, value: 1 }]);
+    assert.deepEqual(fadeKeyframes([1 / 60, 1 / 60], 1, 1, rate), [{ when: 0, value: 0 }, { when: 1, value: 1 }]);
+    assert.deepEqual(fadeKeyframes(fade, 0, 1, rate), [{ when: 0, value: 1 }]);
+  }
 });
 
 let ffmpeg = true;

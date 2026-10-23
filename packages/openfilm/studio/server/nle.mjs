@@ -369,7 +369,8 @@ export function planNleTimeline(film, opts) {
  * @param {number} frames @param {number} gain @param {NleRate} rate
  */
 export function fadeKeyframes(fade, frames, gain, rate) {
-  const fin = Math.min(frames, toFrame(fade[0], rate)), fout = Math.min(frames - fin, toFrame(fade[1], rate));
+  const fin = Math.min(frames, fade[0] > 0 ? Math.max(1, toFrame(fade[0], rate)) : 0);
+  const fout = Math.min(frames - fin, toFrame(fade[1], rate));
   const g = round6(gain);
   /** @type {{ when: number, value: number }[]} */
   const keys = [];

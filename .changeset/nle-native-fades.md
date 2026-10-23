@@ -7,4 +7,4 @@ Keep full source media for simple picture and sound fades in Premiere/Resolve XM
 
 Write explicit source channels, track/output routing and source ticks so Premiere imports the audio clips. Preserve separate stereo channels and their links to the picture.
 
-Keep stylesheet picture effects on faded clips through the render fallback.
+Keep stylesheet picture effects on faded clips through the render fallback, and retain the transparent first frame of very short fade-ins at lower export frame rates.
