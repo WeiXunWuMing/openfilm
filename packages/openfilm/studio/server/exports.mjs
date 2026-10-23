@@ -1226,6 +1226,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
   async function exportNle(job, root, out, signal) {
     const ask = /** @type {NleAsk} */ (job.ask);
     const fcp = ask.format === 'fcpxml';
+    const nativeFades = (ask.format ?? 'xml') === 'xml';
     const app = ask.format === 'jianying' || ask.format === 'capcut' ? ask.format : null;
     /* a draft goes where its app lists its drafts, when the app is on this computer; a drafts folder that refuses the
        write (security software, or the app's own permissions on it) leaves the draft in the exports folder, said so */
@@ -1262,13 +1263,38 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
       await mkdir(scratch, { recursive: true });
       await filmElsewhere(root, scratch, { stage: doc.stage, tracks: doc.tracks.map((t) => ({ clips: t.clips })) });
       const probe = await open(scratch, { root });
-      /** @type {{ id: string, at: number, end: number, from: number, to: number, speed: number, native: number | null, w: number | null, h: number | null }[]} */
+      /** @type {{ id: string, at: number, end: number, from: number, to: number, speed: number, native: number | null, w: number | null, h: number | null, styled: boolean }[]} */
       let loaded;
       try {
-        loaded = await probe.film.page.evaluate(() => /** @type {any} */ (window).__filmEditor.stage.clips().map((/** @type {any} */ c) => ({
-          id: c.id, at: c.at, end: c.end, from: c.span.from, to: c.span.to, speed: c.span.speed,
-          native: Number.isFinite(c.native) ? c.native : null, w: c.nw ?? null, h: c.nh ?? null,
-        })));
+        loaded = await probe.film.page.evaluate((nativeFades) => /** @type {any} */ (window).__filmEditor.stage.clips().map((/** @type {any} */ c) => {
+          let styled = false;
+          if (nativeFades && c.fade && (c.kind === 'video' || c.kind === 'still')) {
+            const css = getComputedStyle(c.el);
+            const values = Array.from(css, prop => [prop, prop === 'opacity' && c.faded && c.base != null ? String(c.base) : css.getPropertyValue(prop)]);
+            // A source with the same placement, outside the film's stylesheet rules, shows which effects need rendering.
+            const host = document.createElement('span'), reference = c.el.cloneNode(false);
+            host.style.cssText = 'all:inherit!important;display:contents!important';
+            reference.removeAttribute('src');
+            reference.removeAttribute('srcset');
+            reference.style.objectFit = 'contain';
+            if (c.faded) reference.style.removeProperty('opacity');
+            host.attachShadow({ mode: 'closed' }).append(reference);
+            c.el.parentElement.append(host);
+            try {
+              const plain = getComputedStyle(reference);
+              styled = values.some(([prop, value]) => !prop.startsWith('--') && plain.getPropertyValue(prop) !== value);
+            } finally { host.remove(); }
+            for (let parent = c.el.parentElement; !styled && parent; parent = parent.parentElement) {
+              const look = getComputedStyle(parent);
+              styled = look.opacity !== '1' || look.filter !== 'none' || look.backdropFilter !== 'none'
+                || look.mixBlendMode !== 'normal' || look.clipPath !== 'none' || look.maskImage !== 'none'
+                || look.transform !== 'none' || look.translate !== 'none' || look.rotate !== 'none' || look.scale !== 'none'
+                || !['rgba(0, 0, 0, 0)', 'rgb(0, 0, 0)'].includes(look.backgroundColor);
+            }
+          }
+          return { id: c.id, at: c.at, end: c.end, from: c.span.from, to: c.span.to, speed: c.span.speed,
+            native: Number.isFinite(c.native) ? c.native : null, w: c.nw ?? null, h: c.nh ?? null, styled };
+        }), nativeFades);
       } finally {
         await probe.close();
       }
@@ -1317,7 +1343,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
               f = { ...f, w: Math.max(1, Math.round(f.w * k)), h: Math.max(1, Math.round(f.h * k)) };
             }
             pictures.push({ id: row.id, kind, src: row.src, path, at: c.at, end: c.end, from: c.from, speed: c.speed, box: row.box,
-              track: ti, hidden: Boolean(track.hidden), styled: Boolean(row.class || row.style), ...(fade ? { faded: true, fade } : {}), facts: f });
+              track: ti, hidden: Boolean(track.hidden), styled: Boolean(row.class || row.style || (fade && c.styled)), ...(fade ? { faded: true, fade } : {}), facts: f });
           }
           if (kind === 'sound' || kind === 'video') {
             const f = await factsOf(path);
@@ -1350,7 +1376,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
 
       const timeline = planNleTimeline({ stage: doc.stage, duration: duration || 0.001, pictures, sounds },
         { title, fps, audio: mode, media: ask.media ?? 'copy', mediaDir: join(final, 'media'), stems: [...stems.keys()],
-          audioTracks: fcp ? 'source' : 'roles', alpha: prores ? 'prores4444' : 'png', nativeFades: (ask.format ?? 'xml') === 'xml' });
+          audioTracks: fcp ? 'source' : 'roles', alpha: prores ? 'prores4444' : 'png', nativeFades });
       const staged = (/** @type {import('./nle.mjs').NleFile} */ f) => join(staging, 'media', basename(f.path));
 
       /* each web page (and each picture Basic Motion can't place) drawn alone, full frame, with alpha. Several are drawn at

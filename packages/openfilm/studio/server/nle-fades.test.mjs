@@ -58,6 +58,61 @@ test('unrepresented effects and other formats keep their render fallback; retime
 
 let ffmpeg = true;
 try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); } catch { ffmpeg = false; }
+test('global styles preserve faded picture effects while unrelated CSS keeps native fades and original audio', { skip: !ffmpeg, timeout: 120_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'of-nle-css-fades-'));
+  const exports = createExports();
+  const previous = process.env.OPENFILM_EXPORTS;
+  process.env.OPENFILM_EXPORTS = join(root, 'Exports');
+  try {
+    const source = join(root, 'source.mp4');
+    execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=green:size=160x90:rate=25:duration=12',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000:duration=12', '-c:v', 'libx264', '-c:a', 'aac', source]);
+    await writeFile(join(root, 'look.css'), 'video{filter:grayscale(1);opacity:0.25}');
+    const html = filmHtml({ stage: { w: 160, h: 90 }, tracks: [{ clips: [
+      { id: 'faded', src: 'source.mp4', time: [4, 6], volume: 0.5, overrides: [{ fade: [0.4, 0.4] }] },
+    ] }] });
+    const cases = [
+      ['inline', '<style>video{filter:grayscale(1);opacity:0.25}</style>', true],
+      ['external', '<link rel="stylesheet" href="look.css">', true],
+      ['ancestor', '<style>body{filter:grayscale(1);opacity:0.25}</style>', true],
+      ['unrelated', '<style>body{font:14px sans-serif}.unused{filter:grayscale(1);opacity:0.25}video{filter:none;opacity:1}</style>', false],
+    ];
+    for (const [name, style, rendered] of cases) {
+      await writeFile(join(root, 'film.html'), html.replace('</head>', style + '\n</head>'));
+      const project = { id: 'css-fades', name, path: root };
+      const job = exports.start(project, { kind: 'nle', format: 'xml', media: 'copy', audio: 'clips', fps: 25, subtitles: false });
+      let done;
+      do { await new Promise(r => setTimeout(r, 50)); done = exports.list(project.id).find(j => j.id === job.id); }
+      while (!['done', 'failed', 'cancelled'].includes(done.status));
+      assert.equal(done.status, 'done', done.error);
+      assert.equal(done.framesTotal, rendered ? 50 : 0, name);
+      const xml = await readFile(done.out, 'utf8');
+      assert.equal([...xml.matchAll(/premiereChannelType="mono"/g)].length, 1, 'the original mono audio still imports once');
+      assert.match(xml, /<audiochannel><sourcechannel>1<\/sourcechannel><\/audiochannel>/);
+      assert.match(xml, /<outputchannelindex>1<\/outputchannelindex>/);
+      assert.match(xml, /<pproTicksIn>1016064000000<\/pproTicksIn>/);
+      assert.match(xml, /<parameterid>level<\/parameterid>[\s\S]*?<when>100<\/when>\s*<value>0<\/value>[\s\S]*?<when>110<\/when>\s*<value>0.5<\/value>/);
+      assert.deepEqual(await readFile(join(dirname(done.out), 'media', 'source.mp4')), await readFile(source));
+      assert.ok(!done.outputs.some(path => /\.wav$/i.test(path)), 'picture fallback must not bake the source audio');
+      if (rendered) {
+        assert.doesNotMatch(xml, /<effectid>opacity<\/effectid>/, 'the picture fade is baked only once');
+        const rgba = execFileSync('ffmpeg', ['-v', 'error', '-ss', '1', '-i', join(dirname(done.out), 'media', 'faded.mov'), '-frames:v', '1', '-pix_fmt', 'rgba', '-f', 'rawvideo', '-']);
+        const pixel = [...rgba.subarray((45 * 160 + 80) * 4, (45 * 160 + 80) * 4 + 4)];
+        assert.ok(pixel[3] >= 60 && pixel[3] <= 68, `${name}: preserve 25% opacity: ${pixel}`);
+        assert.ok(Math.max(...pixel.slice(0, 3)) - Math.min(...pixel.slice(0, 3)) <= 3, `${name}: preserve grayscale: ${pixel}`);
+      } else {
+        assert.match(xml, /<effectid>opacity<\/effectid>/);
+        assert.deepEqual(done.outputs.filter(path => /\.(mov|wav)$/i.test(path)), []);
+        assert.equal([...xml.matchAll(/<file id="file-\d+">/g)].length, 1, 'plain fades still share the complete source');
+      }
+    }
+  } finally {
+    await exports.stopAll();
+    if (previous === undefined) delete process.env.OPENFILM_EXPORTS; else process.env.OPENFILM_EXPORTS = previous;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('explicit and default XML exports copy or link the full recording for fades without replacement MOV or WAV', { skip: !ffmpeg, timeout: 120_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'of-nle-fades-'));
   const exports = createExports();
