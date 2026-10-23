@@ -1319,7 +1319,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
               f = { ...f, w: Math.max(1, Math.round(f.w * k)), h: Math.max(1, Math.round(f.h * k)) };
             }
             pictures.push({ id: row.id, kind, src: row.src, path, at: c.at, end: c.end, from: c.from, speed: c.speed, box: row.box,
-              track: ti, hidden: Boolean(track.hidden), styled: Boolean(row.class || row.style), ...(fade ? { faded: true } : {}), facts: f });
+              track: ti, hidden: Boolean(track.hidden), styled: Boolean(row.class || row.style), ...(fade ? { faded: true, fade } : {}), facts: f });
           }
           if (kind === 'sound' || kind === 'video') {
             const f = await factsOf(path);

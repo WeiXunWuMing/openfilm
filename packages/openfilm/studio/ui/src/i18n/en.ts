@@ -480,7 +480,7 @@ export const en = {
     nleEffects: 'Preserve appearance',
     nleSource: 'Keep full original media',
     nleEffectsHint: 'Effects and speed changes may become short rendered clips. Relink these to the exported media; replacing them with originals can show the wrong source frames.',
-    nleSourceHint: 'Keeps full footage, source trims, placement and audio fades; omits visual styles, rotation and picture fades. HTML and unsupported still images still render. For speed changes or containers needing conversion, choose Preserve appearance.',
+    nleSourceHint: 'Keeps full footage, source trims, placement, and editable picture and audio fades; omits other visual styles and rotation. HTML and unsupported still images still render. For speed changes or containers needing conversion, choose Preserve appearance.',
     nleMedia: 'Source files',
     nleCopy: 'Copy media',
     nleLink: 'Link source files',

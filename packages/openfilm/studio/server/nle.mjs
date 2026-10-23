@@ -23,7 +23,7 @@
  *   · Fades (film.html `overrides`' `fade`): a picture that fades is rendered, its fades in its alpha; a sound that
  *     fades comes as a WAV of its own part, from its first frame, with Audio Levels keyframes for its ramps (counted
  *     from the file's start, which is the clip's, so editors that count keyframes from either agree).
- *     Source mode retains full audio and addresses its ramps at the source in point in XML.
+ *     Source mode retains full picture and audio, with opacity and volume ramps at the source in point in XML.
  */
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
@@ -37,7 +37,7 @@ import { exactRate } from '../../src/rate.mjs';
  *   channels?: number, sampleRate?: number, alpha?: boolean }} SourceFacts
  * @typedef {{ id: string, kind: 'page' | 'video' | 'still', src: string, path: string, at: number, end: number,
  *   from: number, speed: number, box?: FilmBox, track: number, hidden: boolean, styled?: boolean, faded?: boolean,
- *   facts: SourceFacts | null }} NlePicture
+ *   facts: SourceFacts | null, fade?: [number, number] }} NlePicture
  *   A picture clip: its film seconds [at, end), its source from `from` at `speed`; `facts` its file's (w × h as the
  *   browser shows it), null for a page
  * @typedef {'voice' | 'music' | 'sfx' | 'footage'} SoundRole
@@ -63,7 +63,7 @@ import { exactRate } from '../../src/rate.mjs';
  *   video?: { w: number, h: number, alpha: boolean, still: boolean, fps?: number }, audio?: { channels: number, sampleRate: number } }} NleFile
  * @typedef {{ id: string, name: string, fileId: string, start: number, end: number, in: number, out: number, enabled: boolean,
  *   motion?: { scale: number, center: { h: number, v: number } }, gain?: number,
- *   levels?: { when: number, value: number }[], linkGroup?: string, sourceRow?: string }} NleClip
+ *   levels?: { when: number, value: number }[], opacity?: { when: number, value: number }[], linkGroup?: string, sourceRow?: string }} NleClip
  *   Sequence frames [start, end), file frames [in, out); `gain` linear; `levels` its gain's keyframes (its fades),
  *   frames from the clip's first
  * @typedef {{ name: string, enabled: boolean, clips: NleClip[], sourceTrack?: number, role?: SoundRole }} NleTrack
@@ -279,6 +279,7 @@ export function planNleTimeline(film, opts) {
       id: clipId(), name: p.id, fileId: file.id, start: span.start, end: span.start + out - inFrame, in: inFrame, out, enabled: !p.hidden,
       ...link,
       ...(placement.kind === 'motion' ? { motion: placement.motion } : {}),
+      ...(originals && p.fade ? { opacity: fadeKeyframes(p.fade, out - inFrame, 100, rate) } : {}),
     };
     if (p.kind === 'video') footage.set(p.id, { clip, file, picture: p });
     visual.push({ track: p.track, start: clip.start, end: clip.end, clip });
@@ -386,7 +387,9 @@ export function planNleTimeline(film, opts) {
  * @param {number} frames @param {number} gain @param {NleRate} rate
  */
 export function fadeKeyframes(fade, frames, gain, rate) {
-  const fin = Math.min(frames, toFrame(fade[0], rate)), fout = Math.min(frames - fin, toFrame(fade[1], rate));
+  // Any positive fade-in starts at zero, even when it finishes before the second frame.
+  const fin = Math.min(frames, fade[0] > 0 ? Math.max(1, toFrame(fade[0], rate)) : 0);
+  const fout = Math.min(frames - fin, toFrame(fade[1], rate));
   const g = round6(gain);
   /** @type {{ when: number, value: number }[]} */
   const keys = [];
@@ -459,6 +462,16 @@ const levelXml = (gain, pad, keys) => [
   `${pad}    </parameter>`, `${pad}  </effect>`, `${pad}</filter>`,
 ].join('\n');
 
+/** Native picture fades address the source, like Audio Levels. @param {NonNullable<NleClip['opacity']>} keys @param {number} from @param {string} pad */
+const opacityXml = (keys, from, pad) => [
+  `${pad}<filter>`, `${pad}  <effect>`, `${pad}    <name>Opacity</name>`, `${pad}    <effectid>opacity</effectid>`,
+  `${pad}    <effectcategory>motion</effectcategory>`, `${pad}    <effecttype>motion</effecttype>`, `${pad}    <mediatype>video</mediatype>`,
+  `${pad}    <parameter>`, `${pad}      <parameterid>opacity</parameterid>`, `${pad}      <name>Opacity</name>`,
+  `${pad}      <valuemin>0</valuemin>`, `${pad}      <valuemax>100</valuemax>`, `${pad}      <value>100</value>`,
+  ...keys.flatMap(k => [`${pad}      <keyframe>`, `${pad}        <when>${from + k.when}</when>`, `${pad}        <value>${num(k.value)}</value>`, `${pad}      </keyframe>`]),
+  `${pad}    </parameter>`, `${pad}  </effect>`, `${pad}</filter>`,
+].join('\n');
+
 /** Basic Motion: scale and center. @param {NonNullable<NleClip['motion']>} m @param {string} pad */
 const motionXml = (m, pad) => [
   `${pad}<filter>`, `${pad}  <effect>`, `${pad}    <name>Basic Motion</name>`, `${pad}    <effectid>basic</effectid>`,
@@ -521,7 +534,10 @@ export function xmemlDocument(timeline) {
     if (media === 'audio') {
       lines.push(`${pad}  <sourcetrack>`, `${pad}    <mediatype>audio</mediatype>`, `${pad}    <trackindex>${channel + 1}</trackindex>`, `${pad}  </sourcetrack>`);
       if (clip.gain != null || clip.levels) lines.push(levelXml(clip.gain ?? 1, `${pad}  `, clip.levels?.map(k => ({ ...k, when: clip.in + k.when }))));
-    } else if (clip.motion) lines.push(motionXml(clip.motion, `${pad}  `));
+    } else {
+      if (clip.motion) lines.push(motionXml(clip.motion, `${pad}  `));
+      if (clip.opacity) lines.push(opacityXml(clip.opacity, clip.in, `${pad}  `));
+    }
     const group = clip.linkGroup ? groups.get(clip.linkGroup) : undefined;
     if (group && group.length > 1) {
       for (const p of group) {

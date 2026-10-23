@@ -843,6 +843,7 @@ test('XML full originals: copy and link preserve source trims, colors, audio han
         file: clip.querySelector(':scope > file').id,
         times: ['start', 'end', 'in', 'out'].map(key => Number(text(clip, `:scope > ${key}`))),
         keys: [...clip.querySelectorAll('filter keyframe when')].map(key => Number(key.textContent)),
+        values: [...clip.querySelectorAll('filter keyframe value')].map(key => Number(key.textContent)),
         channel: Number(text(clip, 'sourcetrack > trackindex')),
       }));
       return { video: clips('video'), audio: clips('audio'), files: [...doc.querySelectorAll('file')].filter(f => f.querySelector('pathurl')).map(file => ({
@@ -856,6 +857,8 @@ test('XML full originals: copy and link preserve source trims, colors, audio han
     assert.deepEqual(found.audio.map(c => c.times), [...found.video, ...found.video].map(c => c.times));
     assert.deepEqual(found.audio.map(c => c.channel), [1, 1, 1, 2, 2, 2]);
     assert.deepEqual(found.audio[1].keys, [100, 140, 150], 'fade keys use source coordinates on the intact recording');
+    assert.deepEqual(found.video[1].keys, [100, 140, 150], 'native picture fade uses the same source coordinates');
+    assert.deepEqual(found.video[1].values, [100, 100, 0], 'picture opacity fades out over the last 0.4 seconds');
     assert.ok([...found.video, ...found.audio].every(c => c.file === found.files[0].id));
     const exportedSource = fileURLToPath(found.files[0].path.replace(/^file:\/\/localhost\//, 'file:///'));
     assert.equal(hash(exportedSource), originalHash);
