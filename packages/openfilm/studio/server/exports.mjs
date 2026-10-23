@@ -1317,7 +1317,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
               f = { ...f, w: Math.max(1, Math.round(f.w * k)), h: Math.max(1, Math.round(f.h * k)) };
             }
             pictures.push({ id: row.id, kind, src: row.src, path, at: c.at, end: c.end, from: c.from, speed: c.speed, box: row.box,
-              track: ti, hidden: Boolean(track.hidden), styled: Boolean(row.class || row.style), ...(fade ? { faded: true } : {}), facts: f });
+              track: ti, hidden: Boolean(track.hidden), styled: Boolean(row.class || row.style), ...(fade ? { faded: true, fade } : {}), facts: f });
           }
           if (kind === 'sound' || kind === 'video') {
             const f = await factsOf(path);
@@ -1350,7 +1350,7 @@ export function createExports({ onChange = () => {}, captions = subtitlesForExpo
 
       const timeline = planNleTimeline({ stage: doc.stage, duration: duration || 0.001, pictures, sounds },
         { title, fps, audio: mode, media: ask.media ?? 'copy', mediaDir: join(final, 'media'), stems: [...stems.keys()],
-          audioTracks: fcp ? 'source' : 'roles', alpha: prores ? 'prores4444' : 'png' });
+          audioTracks: fcp ? 'source' : 'roles', alpha: prores ? 'prores4444' : 'png', nativeFades: ask.format === 'xml' });
       const staged = (/** @type {import('./nle.mjs').NleFile} */ f) => join(staging, 'media', basename(f.path));
 
       /* each web page (and each picture Basic Motion can't place) drawn alone, full frame, with alpha. Several are drawn at
