@@ -4,6 +4,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { launch } from '../../src/host.mjs';
 import { filmHtml } from '../../src/film-doc.mjs';
 import { open } from '../../src/shared.mjs';
 import { planNleTimeline } from './nle.mjs';
@@ -52,6 +54,58 @@ test('computed looks distinguish inactive outlines from filters, outlines, anima
 
 let ffmpeg = true;
 try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); } catch { ffmpeg = false; }
+
+test('XML relinking keeps neutral styling on the original source while actual fades still render', { skip: !ffmpeg, timeout: 120_000 }, async () => {
+  const root = await mkdtemp(join(tmpdir(), 'of-nle-relink-'));
+  const source = join(root, 'Camera Original.mp4');
+  execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'color=red:size=160x90:rate=25:duration=4',
+    '-f', 'lavfi', '-i', 'color=green:size=160x90:rate=25:duration=4',
+    '-f', 'lavfi', '-i', 'color=blue:size=160x90:rate=25:duration=4',
+    '-filter_complex', '[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]', '-map', '[v]', '-c:v', 'libx264', '-timecode', '01:00:00:00', source]);
+  await writeFile(join(root, 'film.html'), filmHtml({ stage, tracks: [{ clips: [
+    { id: 'plain-cut', src: 'Camera Original.mp4', time: [4, 6] },
+    { id: 'faded-cut', src: 'Camera Original.mp4', at: 2, time: [4, 6], overrides: [{ fade: [0, 0.4] }] },
+    { id: 'styled-cut', src: 'Camera Original.mp4', at: 4, time: [8, 10], style: 'opacity: 1;' },
+  ] }] }));
+  const browser = await launch();
+  try {
+    const page = await browser.newPage();
+    for (const media of ['copy', 'link']) {
+      let finished;
+      const done = new Promise(resolve => { finished = resolve; });
+      const exports = createExports({ onChange: job => { if (['done', 'failed', 'cancelled'].includes(job.status)) finished(job); } });
+      try {
+        exports.start({ id: media, name: media, path: root }, { kind: 'nle', format: 'xml', fps: 25, media, subtitles: false }, { folder: join(root, 'output') });
+        const job = await done;
+        assert.equal(job.status, 'done', job.error);
+        assert.equal(job.framesTotal, 50, 'only the two-second actual fade needs rendering');
+        assert.equal(job.outputs.filter(path => path.endsWith('.mov')).length, 1);
+        const found = await page.evaluate(text => {
+          const doc = new DOMParser().parseFromString(text, 'application/xml');
+          const files = new Map([...doc.querySelectorAll('file > pathurl')].map(p => [p.parentElement.id, p.parentElement]));
+          const textOf = (el, tag) => el.querySelector(':scope > ' + tag)?.textContent;
+          return { error: doc.querySelector('parsererror')?.textContent ?? null,
+            clips: [...doc.querySelectorAll('sequence > media > video > track > clipitem')].map(c => {
+              const id = c.querySelector('file').id, file = files.get(id);
+              return { name: textOf(c, 'name'), file: id, path: textOf(file, 'pathurl'), duration: Number(textOf(file, 'duration')),
+                in: Number(textOf(c, 'in')), out: Number(textOf(c, 'out')) };
+            }) };
+        }, await readFile(job.out, 'utf8'));
+        assert.equal(found.error, null);
+        const [plain, faded, styled] = found.clips;
+        assert.deepEqual(found.clips.map(c => [c.name, c.duration, c.in, c.out]), [
+          ['plain-cut', 300, 100, 150], ['faded-cut', 50, 0, 50], ['styled-cut', 300, 200, 250],
+        ]);
+        assert.equal(styled.file, plain.file, 'both trims share the same full recording');
+        assert.notEqual(faded.file, plain.file);
+        const path = fileURLToPath(styled.path.replace(/^file:\/\/localhost\//, 'file:///'));
+        assert.deepEqual(await readFile(path), await readFile(source));
+        if (media === 'link') assert.equal(path, source);
+      } finally { await exports.stopAll(); }
+    }
+  } finally { await browser.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('export probes track styles and only replaces pictures that actually need rendering', { skip: !ffmpeg, timeout: 120_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'of-nle-effects-export-'));
   const source = join(root, 'take.mp4');
