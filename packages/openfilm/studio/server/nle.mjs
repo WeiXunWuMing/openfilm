@@ -421,7 +421,9 @@ function fileXml(file, rate, pad) {
   if (file.audio) {
     lines.push(`${pad}    <audio>`, `${pad}      <samplecharacteristics>`, `${pad}        <depth>16</depth>`,
       `${pad}        <samplerate>${file.audio.sampleRate}</samplerate>`, `${pad}      </samplecharacteristics>`,
-      `${pad}      <channelcount>${file.audio.channels}</channelcount>`, `${pad}    </audio>`);
+      `${pad}      <channelcount>${file.audio.channels}</channelcount>`,
+      ...Array.from({ length: file.audio.channels }, (_, channel) => `${pad}      <audiochannel><sourcechannel>${channel + 1}</sourcechannel></audiochannel>`),
+      `${pad}    </audio>`);
   }
   lines.push(`${pad}  </media>`, `${pad}</file>`);
   return lines.join('\n');
@@ -470,31 +472,47 @@ const motionXml = (m, pad) => [
 export function xmemlDocument(timeline) {
   const files = new Map(timeline.files.map((f) => [f.id, f]));
   const written = new Set();
+  // Premiere's exploded tracks need one XML track per source channel, with distinct clip IDs and matching links.
+  const audio = timeline.audio.flatMap(track => {
+    const channels = Math.max(1, ...track.clips.map(clip => files.get(clip.fileId)?.audio?.channels ?? 1));
+    return Array.from({ length: channels }, (_, channel) => ({ channel, channels,
+      track: { ...track,
+        clips: track.clips.filter(clip => (files.get(clip.fileId)?.audio?.channels ?? 1) > channel).map(clip => ({ ...clip,
+          id: channel === 0 ? clip.id : `${clip.id}-channel-${channel + 1}`,
+          linkGroup: clip.linkGroup ?? ((files.get(clip.fileId)?.audio?.channels ?? 1) > 1 ? `audio-${clip.id}` : undefined),
+        })),
+      },
+    }));
+  });
+  const outputChannels = Math.max(2, ...audio.map(track => track.channels));
   /** @type {Map<string, { clip: NleClip, media: 'video' | 'audio', track: number, index: number }[]>} */
   const groups = new Map();
   const place = (/** @type {NleTrack[]} */ tracks, /** @type {'video' | 'audio'} */ media) => tracks.forEach((t, ti) => t.clips.forEach((clip, ci) => {
     if (clip.linkGroup) groups.set(clip.linkGroup, [...(groups.get(clip.linkGroup) ?? []), { clip, media, track: ti + 1, index: ci + 1 }]);
   }));
   place(timeline.video, 'video');
-  place(timeline.audio, 'audio');
+  place(audio.map(({ track }) => track), 'audio');
   const rate = timeline.rate;
 
-  const clipXml = (/** @type {NleClip} */ clip, /** @type {'video' | 'audio'} */ media, /** @type {string} */ pad) => {
+  const clipXml = (/** @type {NleClip} */ clip, /** @type {'video' | 'audio'} */ media, /** @type {string} */ pad, channel = 0) => {
     const file = files.get(clip.fileId);
     if (!file) throw new Error(`clip ${clip.id} points at a missing file ${clip.fileId}`);
+    const channelType = media === 'audio' ? (file.audio?.channels === 1 ? 'mono' : file.audio?.channels === 2 ? 'stereo' : null) : null;
     const lines = [
-      `${pad}<clipitem id="${xmlEscape(clip.id)}">`, `${pad}  <name>${xmlEscape(clip.name)}</name>`,
+      `${pad}<clipitem id="${xmlEscape(clip.id)}"${channelType ? ` premiereChannelType="${channelType}"` : ''}>`, `${pad}  <name>${xmlEscape(clip.name)}</name>`,
       `${pad}  <enabled>${bool(clip.enabled)}</enabled>`, `${pad}  <duration>${file.durationFrames}</duration>`,
       rateXml(rate, `${pad}  `),
       `${pad}  <start>${clip.start}</start>`, `${pad}  <end>${clip.end}</end>`, `${pad}  <in>${clip.in}</in>`, `${pad}  <out>${clip.out}</out>`,
     ];
+    if (media === 'audio') lines.push(`${pad}  <pproTicksIn>${Math.round(clip.in / rate.fps * 254016000000)}</pproTicksIn>`,
+      `${pad}  <pproTicksOut>${Math.round(clip.out / rate.fps * 254016000000)}</pproTicksOut>`);
     if (media === 'video') {
       lines.push(`${pad}  <alphatype>${file.video?.alpha ? 'straight' : 'none'}</alphatype>`, `${pad}  <pixelaspectratio>square</pixelaspectratio>`, `${pad}  <anamorphic>FALSE</anamorphic>`);
     }
     if (written.has(file.id)) lines.push(`${pad}  <file id="${xmlEscape(file.id)}"/>`);
     else { written.add(file.id); lines.push(fileXml(file, rate, `${pad}  `)); }
     if (media === 'audio') {
-      lines.push(`${pad}  <sourcetrack>`, `${pad}    <mediatype>audio</mediatype>`, `${pad}    <trackindex>1</trackindex>`, `${pad}  </sourcetrack>`);
+      lines.push(`${pad}  <sourcetrack>`, `${pad}    <mediatype>audio</mediatype>`, `${pad}    <trackindex>${channel + 1}</trackindex>`, `${pad}  </sourcetrack>`);
       if (clip.gain != null || clip.levels) lines.push(levelXml(clip.gain ?? 1, `${pad}  `, clip.levels?.map(k => ({ ...k, when: clip.in + k.when }))));
     } else {
       if (clip.motion) lines.push(motionXml(clip.motion, `${pad}  `));
@@ -512,15 +530,16 @@ export function xmemlDocument(timeline) {
     return lines.join('\n');
   };
 
-  const trackXml = (/** @type {NleTrack} */ track, /** @type {'video' | 'audio'} */ media, /** @type {string} */ pad) => [
-    media === 'audio' ? `${pad}<track premiereTrackType="Stereo">` : `${pad}<track>`,
-    ...track.clips.map((c) => clipXml(c, media, `${pad}  `)),
-    `${pad}  <enabled>${bool(track.enabled)}</enabled>`, `${pad}  <locked>FALSE</locked>`, `${pad}</track>`,
+  const trackXml = (/** @type {NleTrack} */ track, /** @type {'video' | 'audio'} */ media, /** @type {string} */ pad, channel = 0, channels = 1) => [
+    media === 'audio' ? `${pad}<track${channels <= 2 ? ' premiereTrackType="Stereo"' : ''} currentExplodedTrackIndex="${channel}" totalExplodedTrackCount="${channels}">` : `${pad}<track>`,
+    ...track.clips.map((c) => clipXml(c, media, `${pad}  `, channel)),
+    `${pad}  <enabled>${bool(track.enabled)}</enabled>`, `${pad}  <locked>FALSE</locked>`,
+    ...(media === 'audio' ? [`${pad}  <outputchannelindex>${channel + 1}</outputchannelindex>`] : []), `${pad}</track>`,
   ].join('\n');
 
   const p = '        ';
   return [
-    '<?xml version="1.0" encoding="UTF-8"?>', '<!DOCTYPE xmeml>', '<xmeml version="4">', '  <sequence id="sequence-1">',
+    '<?xml version="1.0" encoding="UTF-8"?>', '<!DOCTYPE xmeml>', '<xmeml version="4">', '  <sequence id="sequence-1" explodedTracks="true">',
     `    <name>${xmlEscape(timeline.name)}</name>`, `    <duration>${timeline.durationFrames}</duration>`,
     rateXml(rate, '    '), timecodeXml(rate, '    '), '    <in>-1</in>', '    <out>-1</out>', '    <media>', '      <video>',
     `${p}<format>`, `${p}  <samplecharacteristics>`, rateXml(rate, `${p}    `),
@@ -528,9 +547,12 @@ export function xmemlDocument(timeline) {
     `${p}    <anamorphic>FALSE</anamorphic>`, `${p}    <pixelaspectratio>square</pixelaspectratio>`, `${p}    <fielddominance>none</fielddominance>`,
     `${p}  </samplecharacteristics>`, `${p}</format>`,
     ...timeline.video.map((t) => trackXml(t, 'video', p)),
-    '      </video>', '      <audio>', `${p}<numOutputChannels>2</numOutputChannels>`,
+    '      </video>', '      <audio>', `${p}<numOutputChannels>${outputChannels}</numOutputChannels>`,
     `${p}<format>`, `${p}  <samplecharacteristics>`, `${p}    <depth>16</depth>`, `${p}    <samplerate>48000</samplerate>`, `${p}  </samplecharacteristics>`, `${p}</format>`,
-    ...timeline.audio.map((t) => trackXml(t, 'audio', p)),
+    `${p}<outputs>`,
+    ...Array.from({ length: outputChannels }, (_, channel) => `${p}  <group><index>${channel + 1}</index><numchannels>1</numchannels><downmix>0</downmix><channel><index>${channel + 1}</index></channel></group>`),
+    `${p}</outputs>`,
+    ...audio.map(({ track, channel, channels }) => trackXml(track, 'audio', p, channel, channels)),
     '      </audio>', '    </media>', '  </sequence>', '</xmeml>', '',
   ].join('\n');
 }

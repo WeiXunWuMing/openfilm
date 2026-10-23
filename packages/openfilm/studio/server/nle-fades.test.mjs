@@ -58,7 +58,7 @@ test('unrepresented effects and other formats keep their render fallback; retime
 
 let ffmpeg = true;
 try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); } catch { ffmpeg = false; }
-test('real XML exports copy or link the full recording for fades without rendering a replacement video or WAV', { skip: !ffmpeg, timeout: 120_000 }, async () => {
+test('explicit and default XML exports copy or link the full recording for fades without replacement MOV or WAV', { skip: !ffmpeg, timeout: 120_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'of-nle-fades-'));
   const exports = createExports();
   const previous = process.env.OPENFILM_EXPORTS;
@@ -72,15 +72,22 @@ test('real XML exports copy or link the full recording for fades without renderi
       { id: 'faded', src: 'footage/Camera Original.mp4', time: [4, 6], volume: 0.5, overrides: [{ fade: [0.4, 0.4] }] },
       { id: 'again', src: 'footage/Camera Original.mp4', time: [8, 10], at: 2 },
     ] }] }));
-    for (const media of ['copy', 'link']) {
+    for (const media of ['copy', 'link']) for (const format of ['xml', undefined]) {
       const project = { id: 'fades', name: 'Fades', path: root };
-      const job = exports.start(project, { kind: 'nle', format: 'xml', media, audio: 'clips', fps: 25, subtitles: false });
+      const job = exports.start(project, { kind: 'nle', format, media, audio: 'clips', fps: 25, subtitles: false });
       let done;
       do { await new Promise(r => setTimeout(r, 50)); done = exports.list(project.id).find(j => j.id === job.id); }
       while (!['done', 'failed', 'cancelled'].includes(done.status));
       assert.equal(done.status, 'done', done.error);
       assert.equal(done.framesTotal, 0);
       const xml = await readFile(done.out, 'utf8');
+      assert.match(xml, /<sequence id="sequence-1" explodedTracks="true">/);
+      assert.match(xml, /<track premiereTrackType="Stereo" currentExplodedTrackIndex="0" totalExplodedTrackCount="1">/);
+      assert.equal([...xml.matchAll(/premiereChannelType="mono"/g)].length, 2);
+      assert.match(xml, /<audiochannel><sourcechannel>1<\/sourcechannel><\/audiochannel>/);
+      assert.match(xml, /<outputchannelindex>1<\/outputchannelindex>/);
+      assert.match(xml, /<pproTicksIn>1016064000000<\/pproTicksIn>/);
+      assert.match(xml, /<pproTicksOut>1524096000000<\/pproTicksOut>/);
       assert.match(xml, /<effectid>opacity<\/effectid>/);
       assert.match(xml, /<parameterid>level<\/parameterid>/);
       assert.equal([...xml.matchAll(/<file id="file-1">/g)].length, 1);

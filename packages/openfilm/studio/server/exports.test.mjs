@@ -904,7 +904,9 @@ test('editing software: an xmeml folder; pages rendered with alpha, footage plac
     ['Cut.xml', 'media/Cut - footage.wav', 'media/Cut - voice.wav', 'media/badge.png', 'media/slow.mov', 'media/title-2.mov', 'media/title.mov']);
   const xml = readFileSync(stems.out, 'utf8');
   assert.match(xml, /<pathurl>file:\/\/localhost\/[^<]*\/Cut\/footage\/shot%20one\.mp4<\/pathurl>/, 'linked to the footage where it is');
-  assert.ok(!xml.includes('<link>'), 'a stem is not linked to a picture');
+  for (const [, link] of xml.matchAll(/<link>([\s\S]*?)<\/link>/g)) {
+    assert.ok(!link.includes('<mediatype>video</mediatype>'), 'a stem may link its channels, but not a picture');
+  }
 });
 
 test('剪映: the same timeline as a draft in 剪映\'s drafts folder, its media beside it, subtitles a text track', { ...ffmpeg, timeout: 240_000 }, async () => {
