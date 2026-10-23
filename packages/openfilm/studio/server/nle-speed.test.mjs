@@ -102,7 +102,9 @@ test('all editors keep the full video and a 150% seven-frame cut while its audio
   const root = await mkdtemp(join(tmpdir(), 'of-nle-speed-'));
   const source = join(root, 'take.mp4');
   execFileSync('ffmpeg', ['-v', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=160x90:rate=25:duration=4',
-    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4', '-c:v', 'libx264', '-c:a', 'aac', '-shortest', source]);
+    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4', '-c:v', 'libx264', '-c:a', 'aac', '-timecode', '01:00:00:00', '-shortest', source]);
+  const timecode = execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream_tags=timecode', '-of', 'default=nw=1:nk=1', source]).toString().trim();
+  assert.equal(timecode, '01:00:00:00');
   await writeFile(join(root, 'film.html'), filmHtml({ stage, tracks: [{ clips: [{ id: 'shot', src: 'take.mp4', time: [1, 1.42], speed: 1.5 }] }] }));
   try {
     for (const format of ['xml', 'fcpxml', 'jianying', 'capcut']) {
@@ -118,6 +120,13 @@ test('all editors keep the full video and a 150% seven-frame cut while its audio
         assert.deepEqual(await readFile(video[0]), await readFile(source));
         assert.equal(job.outputs.filter(path => path.endsWith('.mov')).length, 0);
         assert.equal(sounds.length, 1);
+        if (format === 'xml') {
+          const xml = await readFile(job.out, 'utf8');
+          const clip = xml.match(/<clipitem id="clipitem-1">[\s\S]*?<\/clipitem>/)[0];
+          assert.match(clip, /<value>150<\/value>/);
+          assert.equal(Number(clip.match(/<pproTicksIn>(\d+)<\/pproTicksIn>/)[1]), 254016000000);
+          assert.equal(Number(clip.match(/<pproTicksOut>(\d+)<\/pproTicksOut>/)[1]), Math.round(1.42 * 254016000000));
+        }
         const samples = execFileSync('ffmpeg', ['-v', 'error', '-ss', '0.04', '-i', sounds[0], '-t', '0.2', '-ac', '1', '-ar', '16000', '-f', 'f32le', '-']);
         let crossings = 0;
         for (let i = 4; i < samples.length; i += 4) if (samples.readFloatLE(i - 4) <= 0 && samples.readFloatLE(i) > 0) crossings++;
