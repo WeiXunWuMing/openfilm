@@ -43,7 +43,8 @@ test('copied and linked originals retain source timecode while cuts and sequence
     assert.equal(timeline.files[0].job.kind, media);
     assert.match(source, /<timebase>25<\/timebase>\s*<ntsc>FALSE<\/ntsc>/);
     assert.match(source, /<string>01:00:00:00<\/string>/);
-    assert.doesNotMatch(source, /<frame>|<displayformat>/, 'string plus its source rate defines the 90000-frame address');
+    assert.doesNotMatch(source, /<frame>/, 'string plus its source rate defines the 90000-frame address');
+    assert.match(source, /<displayformat>NDF<\/displayformat>/);
     assert.match(sequence, /<string>00:00:00:00<\/string>\s*<frame>0<\/frame>\s*<displayformat>NDF<\/displayformat>/);
     for (const clip of [...timeline.video[0].clips, ...timeline.audio[0].clips]) {
       assert.equal(clip.start, 0);
@@ -51,6 +52,16 @@ test('copied and linked originals retain source timecode while cuts and sequence
       assert.equal(clip.out, Math.round(6 * timeline.rate.fps));
     }
     assert.equal(timeline.files[0].durationFrames, Math.round(12 * timeline.rate.fps));
+  }
+});
+
+test('source timecode display format follows its separator', () => {
+  for (const [value, fps, format] of [['01:00:00:00', 25, 'NDF'], ['01:00:00;00', 29.97, 'DF']]) {
+    const factsWithTimecode = { ...facts, timecode: { value, rate: nleRate(fps) } };
+    const source = timecodes(xmemlDocument(plan({}, [{ ...picture, facts: factsWithTimecode }], [])))[1];
+    assert.ok(source.includes('<string>' + value + '</string>'));
+    assert.ok(source.includes('<displayformat>' + format + '</displayformat>'));
+    assert.doesNotMatch(source, /<frame>/);
   }
 });
 

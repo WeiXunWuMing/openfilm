@@ -419,7 +419,8 @@ const timecodeXml = (/** @type {NleRate} */ rate, /** @type {string} */ pad, /**
   `${pad}<timecode>`, rateXml(source?.rate ?? rate, `${pad}  `),
   `${pad}  <string>${xmlEscape(source?.value ?? '00:00:00:00')}</string>`,
   // xmeml accepts the string and its own rate without a second, potentially conflicting frame count.
-  ...(source ? [] : [`${pad}  <frame>0</frame>`, `${pad}  <displayformat>NDF</displayformat>`]), `${pad}</timecode>`,
+  ...(source ? [] : [`${pad}  <frame>0</frame>`]),
+  `${pad}  <displayformat>${source?.value.includes(';') ? 'DF' : 'NDF'}</displayformat>`, `${pad}</timecode>`,
 ].join('\n');
 
 /** @param {NleFile} file @param {NleRate} rate @param {string} pad */
