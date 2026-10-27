@@ -146,16 +146,20 @@ export function filmVideos(root, film) {
 
 /**
  * In a page: whether the browser shows the first frame of the video at `url`. One it does not decode (ProRes; HEVC
- * without a chip for it) fails at once, or never shows a frame.
+ * without a chip for it) fails at once, or loads it and shows nothing: a file it can read but not decode has no
+ * picture, and a film drawn from it is black.
  * @param {string} url
  */
-const firstFrame = (url) => new Promise((done) => {
+export const firstFrame = (url) => new Promise((done) => {
   const video = document.createElement('video');
   video.muted = true;
   video.preload = 'auto';
   const end = (/** @type {boolean} */ shown) => { clearTimeout(timer); video.removeAttribute('src'); video.load(); done(shown); };
   const timer = setTimeout(() => end(false), 10_000);
-  video.addEventListener('loadeddata', () => end(true), { once: true });
+  /* `loadeddata` says the file loaded, not that a picture came: a browser that cannot decode it (HEVC without a
+     decoder for it) says it too, and shows nothing. A picture is what plays: without one, the file needs a copy
+     the browser can play */
+  video.addEventListener('loadeddata', () => end(video.videoWidth > 0), { once: true });
   video.addEventListener('error', () => end(false), { once: true });
   video.src = url;
 });

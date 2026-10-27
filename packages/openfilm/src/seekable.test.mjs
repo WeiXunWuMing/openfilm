@@ -5,8 +5,9 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { filmHtml } from './film-doc.mjs';
+import { launch, serve } from './host.mjs';
 import { render } from './render.mjs';
-import { copyNeed, madeCopy, seekableCopies, slowSeeking } from './seekable.mjs';
+import { copyNeed, firstFrame, madeCopy, seekableCopies, slowSeeking } from './seekable.mjs';
 import { look } from './look.mjs';
 
 const hasFfmpeg = (() => { try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); return true; } catch { return false; } })();
@@ -47,6 +48,24 @@ test('a render serves the film\'s slow-seeking videos as their copies', ffmpeg, 
     assert.ok(existsSync(done.out));
     assert.equal(readdirSync(join(dir, '.film/cache/seek')).filter((f) => f.endsWith('.mp4') && !f.includes('.part')).length, 1);
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a file the browser loads without a picture is not taken for playable: it gets a copy', ffmpeg, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'of-seekable-nopic-'));
+  const site = await serve(dir);
+  const browser = await launch();
+  try {
+    /* sound only: the browser loads it and has no picture to show, as with footage it cannot decode */
+    execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-c:a', 'aac', join(dir, 'sound.m4a')]);
+    clip(join(dir, 'video.mp4'), 5);
+    const page = await browser.newPage();
+    assert.equal(await page.evaluate(firstFrame, `${site.url}/sound.m4a`), false, 'a file with no picture is not playable');
+    assert.equal(await page.evaluate(firstFrame, `${site.url}/video.mp4`), true, 'a video with a picture plays');
+  } finally {
+    await browser.close();
+    await site.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
