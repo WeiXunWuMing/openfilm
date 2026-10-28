@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { filmHtml } from './film-doc.mjs';
 import { launch, serve } from './host.mjs';
 import { render } from './render.mjs';
@@ -16,6 +16,8 @@ const ffmpeg = { skip: !hasFfmpeg && 'no ffmpeg', timeout: 120_000 };
 /** 4 s at 30 fps with a key frame every `gop` frames. */
 const clip = (file, gop) => execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30', '-t', '4',
   '-c:v', 'libx264', '-preset', 'ultrafast', '-g', String(gop), '-keyint_min', String(gop), '-sc_threshold', '0', '-pix_fmt', 'yuv420p', file]);
+/** The codecs of a file's sound streams, as ffprobe names them: '' when it has none. */
+const soundStreams = (file) => execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', file]).toString().trim();
 /** A video's frame times, as its packets give them. */
 const times = (file) => execFileSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'packet=pts_time', '-of', 'csv=p=0', file]).toString().trim().split('\n').map(Number).sort((a, b) => a - b);
 
@@ -52,17 +54,26 @@ test('a render serves the film\'s slow-seeking videos as their copies', ffmpeg, 
   }
 });
 
-test('a file the browser loads without a picture is not taken for playable: it gets a copy', ffmpeg, async () => {
+test('footage the browser plays the sound of but shows no picture of, ProRes with sound, gets a copy it plays', ffmpeg, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'of-seekable-nopic-'));
   const site = await serve(dir);
   const browser = await launch();
   try {
-    /* sound only: the browser loads it and has no picture to show, as with footage it cannot decode */
-    execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1', '-c:a', 'aac', join(dir, 'sound.m4a')]);
-    clip(join(dir, 'video.mp4'), 5);
+    /* ProRes with AAC sound, as cameras record it: the browser plays the sound, shows no picture and reports no error */
+    execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=size=320x180:rate=30', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
+      '-t', '1', '-c:v', 'prores_ks', '-profile:v', '3', '-c:a', 'aac', '-shortest', join(dir, 'prores-sound.mov')]);
+    clip(join(dir, 'fast.mp4'), 5);
     const page = await browser.newPage();
-    assert.equal(await page.evaluate(firstFrame, `${site.url}/sound.m4a`), false, 'a file with no picture is not playable');
-    assert.equal(await page.evaluate(firstFrame, `${site.url}/video.mp4`), true, 'a video with a picture plays');
+    const plays = (file) => page.evaluate(firstFrame, `${site.url}/${relative(dir, file).split(sep).map(encodeURIComponent).join('/')}`);
+    assert.equal(await plays(join(dir, 'prores-sound.mov')), false, 'a file it shows no picture of is not playable');
+    assert.equal(await plays(join(dir, 'fast.mp4')), true, 'a video with a picture plays');
+    /* asked as a render asks it: only the footage without a picture needs a copy */
+    const copies = await seekableCopies([join(dir, 'prores-sound.mov'), join(dir, 'fast.mp4')], dir, { plays, slow: false });
+    assert.deepEqual([...copies.keys()], [join(dir, 'prores-sound.mov')]);
+    const copy = /** @type {string} */ (copies.get(join(dir, 'prores-sound.mov')));
+    assert.equal(await plays(copy), true, 'the copy plays');
+    assert.deepEqual(times(copy), times(join(dir, 'prores-sound.mov')), 'the same frames at the same times');
+    assert.equal(soundStreams(copy), '', 'the copy is the picture only: the sound is still mixed from the original');
   } finally {
     await browser.close();
     await site.close();
@@ -101,11 +112,16 @@ test('footage the browser does not decode gets a copy it plays, with its alpha w
 test('a render shows ProRes footage, which no browser decodes, through its copy', ffmpeg, async () => {
   const dir = mkdtempSync(join(tmpdir(), 'of-seekable-prores-render-'));
   try {
-    execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=0x2060c0:size=320x180:rate=30', '-t', '1', '-c:v', 'prores_ks', '-profile:v', '3', join(dir, 'a.mov')]);
+    /* ProRes with the sound a camera records with it: a browser plays the sound, shows no picture and reports no error */
+    execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=0x2060c0:size=320x180:rate=30', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
+      '-t', '1', '-c:v', 'prores_ks', '-profile:v', '3', '-c:a', 'aac', '-shortest', join(dir, 'a.mov')]);
     writeFileSync(join(dir, 'film.html'), filmHtml({ stage: { w: 320, h: 180 }, tracks: [{ clips: [{ id: 'v', src: 'a.mov', at: 0, time: [0, 1] }] }] }));
     const started = Date.now();
     const done = await render([dir, '0-0.5'], { out: join(dir, 'out.mp4'), workers: 1, silent: true, onProgress() {} });
     assert.ok(Date.now() - started < 60_000, 'no frame waits on a video that never shows');
+    const [made] = readdirSync(join(dir, '.film/cache/seek')).filter((f) => f.endsWith('.mp4') && !f.includes('.part'));
+    assert.ok(made, 'the footage is drawn through its copy');
+    assert.equal(soundStreams(join(dir, '.film/cache/seek', made)), '', 'the copy is the picture only');
     const [r, g, b] = execFileSync('ffmpeg', ['-v', 'error', '-ss', '0.2', '-i', done.out, '-frames:v', '1', '-vf', 'crop=4:4:160:90,format=rgb24', '-f', 'rawvideo', '-']);
     assert.ok(Math.abs(r - 0x20) < 16 && Math.abs(g - 0x60) < 16 && Math.abs(b - 0xc0) < 16, `the footage's colour: ${r},${g},${b}`);
   } finally {
